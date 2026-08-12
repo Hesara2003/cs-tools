@@ -2342,7 +2342,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
             caseId={caseId}
             severity={c.severity}
             caseState={c.state}
-            isClosed={isClosed}
           />
         </Box>
       )}
