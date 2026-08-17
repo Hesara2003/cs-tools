@@ -52,6 +52,16 @@ func handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// corsAny sets a permissive CORS header so a browser-based test page (e.g.
+// an EventSource from a different origin) can actually read the response —
+// EventSource is subject to the same-origin policy just like fetch/XHR.
+// Fine here since this component is deliberately public and unauthenticated
+// already; never do this on anything that carries real auth or session
+// state.
+func corsAny(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+}
+
 // handleStream writes a "tick" event every 2s and a comment-only ": ping"
 // heartbeat every 15s, flushing after every write, with X-Accel-Buffering
 // set — the same technique apps/csm-portal/backend's real
@@ -71,6 +81,7 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
+	corsAny(w)
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
