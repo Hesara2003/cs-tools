@@ -1,0 +1,16 @@
+schemaVersion: 1.2
+
+endpoints:
+  # SSE has no dedicated Choreo component type — it's just a long-lived HTTP
+  # GET response, so this is declared as a normal REST endpoint (matching
+  # apps/csm-portal/backend's real csm-portal-activity-stream endpoint,
+  # which this POC exists to de-risk before trusting it further).
+  - name: sse-poc-stream
+    displayName: SSE Choreo Compatibility POC
+    service:
+      basePath: /
+      port: 8080
+    type: REST
+    networkVisibilities:
+      - Public
+    schemaFilePath: openapi.yaml
