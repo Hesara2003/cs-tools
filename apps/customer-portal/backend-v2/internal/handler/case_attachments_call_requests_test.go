@@ -99,6 +99,14 @@ func (f *fakeEntityCallRequestClient) UpdateCallRequest(ctx context.Context, id 
 	return entity.UpdateCallRequestResponse{CallRequest: entity.CallRequestUpdated{ID: id}}, nil
 }
 
+// GetCase is a stub for SearchCallRequests' caller-scope check (see
+// caller_scope.go) — these tests never call SetCallerScope, so
+// requireProjectMember treats the nil resolver as unscoped and never
+// inspects this response.
+func (f *fakeEntityCallRequestClient) GetCase(ctx context.Context, id string) (entity.CaseView, error) {
+	return entity.CaseView{}, nil
+}
+
 // TestCreateCallRequest_CaseIDFromPath verifies POST /cases/{caseId}/call-requests
 // forces CaseID from the path — the frontend's request body carries only
 // reason/utcTimes/durationInMinutes, never a caseId field.

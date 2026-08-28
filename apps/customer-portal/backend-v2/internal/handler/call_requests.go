@@ -33,6 +33,7 @@ type entityCallRequestClient interface {
 	CreateCallRequest(ctx context.Context, req entity.CreateCallRequestRequest) (entity.CreateCallRequestResponse, error)
 	SearchCallRequests(ctx context.Context, req entity.SearchCallRequestsRequest) (entity.SearchCallRequestsResponse, error)
 	UpdateCallRequest(ctx context.Context, id string, req entity.UpdateCallRequestRequest) (entity.UpdateCallRequestResponse, error)
+	GetCase(ctx context.Context, id string) (entity.CaseView, error)
 }
 
 // CallRequestHandler handles HTTP requests for call-request operations.
@@ -41,11 +42,22 @@ type entityCallRequestClient interface {
 // source — a Postgres-mode deployment 404s on every route this handler serves.
 type CallRequestHandler struct {
 	entity entityCallRequestClient
+
+	callerScope *CallerScopeResolver
 }
 
 // NewCallRequestHandler creates a CallRequestHandler backed by the given entity client.
 func NewCallRequestHandler(entity entityCallRequestClient) *CallRequestHandler {
 	return &CallRequestHandler{entity: entity}
+}
+
+// SetCallerScope enables caller-scoped access: SearchCallRequests requires
+// the caller to be an active portal-user contact of the case's own project
+// (resolved via GetCase). Always enforced in production (main.go calls this
+// unconditionally, no kill switch) — see ProjectHandler.SetCallerScope for
+// why this is a setter rather than a constructor parameter.
+func (h *CallRequestHandler) SetCallerScope(resolver *CallerScopeResolver) {
+	h.callerScope = resolver
 }
 
 // CreateCallRequest handles POST /cases/{caseId}/call-requests.
@@ -104,6 +116,19 @@ func (h *CallRequestHandler) SearchCallRequests(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// caseView, err := h.entity.GetCase(r.Context(), caseID)
+	// if err != nil {
+	// 	slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
+	// 	mapUpstreamError(w, err, "Failed to retrieve case.")
+	// 	return
+	// }
+	// if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {

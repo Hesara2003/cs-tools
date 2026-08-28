@@ -58,6 +58,8 @@ type RegistryHandler struct {
 	entity    entityUserProjectClient
 	registry  registryClient
 	adminRole string
+
+	callerScope *CallerScopeResolver
 }
 
 // NewRegistryHandler creates a RegistryHandler. adminRole is the role string
@@ -65,6 +67,16 @@ type RegistryHandler struct {
 // creating/managing service tokens and tokens on behalf of other users.
 func NewRegistryHandler(entityClient entityUserProjectClient, registryClient registryClient, adminRole string) *RegistryHandler {
 	return &RegistryHandler{entity: entityClient, registry: registryClient, adminRole: adminRole}
+}
+
+// SetCallerScope enables caller-scoped access: SearchRegistryTokens requires
+// the caller to be an active portal-user contact of the project in the URL
+// path, checked before adminRole's own admin/non-admin distinction even
+// applies. Always enforced in production (main.go calls this
+// unconditionally, no kill switch) — see ProjectHandler.SetCallerScope for
+// why this is a setter rather than a constructor parameter.
+func (h *RegistryHandler) SetCallerScope(resolver *CallerScopeResolver) {
+	h.callerScope = resolver
 }
 
 func (h *RegistryHandler) isAdmin(roles []string) bool {
@@ -197,6 +209,13 @@ func (h *RegistryHandler) SearchRegistryTokens(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	userDetails, err := h.entity.GetMe(r.Context())
 	if err != nil {

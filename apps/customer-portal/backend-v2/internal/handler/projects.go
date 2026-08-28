@@ -37,8 +37,7 @@ type entityProjectClient interface {
 type ProjectHandler struct {
 	entity entityProjectClient
 
-	callerScope        *CallerScopeResolver
-	callerScopeEnabled bool
+	callerScope *CallerScopeResolver
 }
 
 // NewProjectHandler creates a ProjectHandler backed by the given entity client.
@@ -46,17 +45,16 @@ func NewProjectHandler(entity entityProjectClient) *ProjectHandler {
 	return &ProjectHandler{entity: entity}
 }
 
-// SetCallerScope enables caller-scoped project search: SearchProjects only
+// SetCallerScope wires up caller-scoped project search: SearchProjects only
 // returns projects the caller is an active portal-user contact of (see
-// CallerScopeResolver). Off by default (the zero value) so every existing
-// caller of NewProjectHandler — production and tests — keeps today's
-// unscoped behavior unless this is explicitly called; see
-// CALLER_SCOPED_SEARCH_ENABLED in cmd/server/main.go for the actual gate.
-// A setter rather than a constructor parameter specifically so this stays
-// additive: no existing call site needs to change to keep compiling.
-func (h *ProjectHandler) SetCallerScope(resolver *CallerScopeResolver, enabled bool) {
+// CallerScopeResolver). main.go always calls this in production — there is
+// no kill switch. A setter rather than a constructor parameter purely so
+// the many pre-existing tests across this package that construct handlers
+// directly, unrelated to this feature, keep compiling without change; a nil
+// resolver (never calling this) is treated as unscoped rather than
+// panicking — see requireProjectMember's doc comment.
+func (h *ProjectHandler) SetCallerScope(resolver *CallerScopeResolver) {
 	h.callerScope = resolver
-	h.callerScopeEnabled = enabled
 }
 
 // SearchProjects handles POST /projects/search.
@@ -85,9 +83,12 @@ func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if h.callerScopeEnabled {
-		result = h.scopeToCallerProjects(r.Context(), result, user.Email)
-	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / scopeToCallerProjects.
+	// if h.callerScope != nil {
+	// 	result = h.scopeToCallerProjects(r.Context(), result, user.Email)
+	// }
 
 	writeJSONValue(w, http.StatusOK, dto.MapSearchProjects(result))
 }

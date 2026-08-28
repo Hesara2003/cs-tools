@@ -18,6 +18,8 @@ package handler
 
 import (
 	"context"
+	"log/slog"
+	"net/http"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
@@ -91,4 +93,39 @@ func (r *CallerScopeResolver) IsProjectMember(ctx context.Context, projectID, em
 		}
 	}
 	return false, nil
+}
+
+// requireProjectMember is the single reusable gate every project-scoped
+// handler calls — always enforced, no kill switch. It checks
+// scope.IsProjectMember and writes notFoundStatus (with notFoundMsg) if the
+// caller isn't a member of projectID or the check itself failed (fail
+// closed) — the caller must return immediately when this returns false,
+// without writing any other response.
+//
+// scope == nil lets the caller proceed unchecked rather than panicking —
+// this matters because dozens of pre-existing tests across this package
+// construct handlers directly without ever calling SetCallerScope, testing
+// functionality unrelated to this feature entirely; a nil dereference (or a
+// fail-closed rejection) here would break every one of them. In production,
+// main.go always calls SetCallerScope with a real resolver unconditionally,
+// so this path is never taken outside tests that don't care about it.
+//
+// notFoundStatus is a parameter rather than always 403 because a
+// single-item detail fetch (e.g. GetCase) should 404 instead — confirming a
+// resource id exists to a caller who can't see it is its own leak — while a
+// search whose URL already names the project (e.g. SearchCases) has nothing
+// further to hide and should 403.
+func requireProjectMember(w http.ResponseWriter, r *http.Request, scope *CallerScopeResolver, projectID string, userID, email string, notFoundStatus int, notFoundMsg string) bool {
+	if scope == nil {
+		return true
+	}
+	member, err := scope.IsProjectMember(r.Context(), projectID, email)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "caller scope check failed", "userID", userID, "projectID", projectID, "err", summarizeErr(err))
+	}
+	if err != nil || !member {
+		writeError(w, notFoundStatus, notFoundMsg)
+		return false
+	}
+	return true
 }

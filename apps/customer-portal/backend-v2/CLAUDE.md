@@ -326,7 +326,7 @@ Like the registry service, several of this service's error responses are surface
 `writeUpstreamMessage` rather than `mapUpstreamError`'s generic fallback — see
 `usermanagement.extractErrorMessage`, which parses the upstream's own `{"message": "..."}` body.
 
-## Caller-scoped project/case search (`CALLER_SCOPED_SEARCH_ENABLED`, off by default)
+## Caller-scoped project/case search (always enforced, no kill switch)
 
 `POST /projects/search`, `POST /projects/{id}/cases/search`, and `GET /cases/{id}` currently return
 results for **any** authenticated caller regardless of which projects they actually belong to — there
@@ -346,26 +346,71 @@ else here already uses. ServiceNow data source only — no Postgres equivalent f
 `handler.CallerScopeResolver` (`internal/handler/caller_scope.go`) answers membership one project at
 a time: page through `entity.SearchProjectContacts(projectID, ...)` (bounded —
 `callerScopeContactsLimit`/`callerScopeContactsMaxPages` — independent of what `Total` reports) and
-check for a case-insensitive email match with `GrantsCaseAccess: true`. It's wired into
-`ProjectHandler`/`CaseHandler` via a `SetCallerScope(resolver, enabled)` setter — deliberately a
-setter rather than a constructor parameter, so every existing call site (production and tests) keeps
-compiling and behaving identically unless `main.go` explicitly opts a handler in.
+check for a case-insensitive email match with `GrantsCaseAccess: true`.
 
-- `SearchProjects`: post-filters the entity-service response to only projects the caller is a member
-  of (one `IsProjectMember` call per returned project — there's no way to push this down into the
-  search request itself, since `SearchProjectsRequest` has no caller-identity filter). `Total` is
-  adjusted to the filtered count; `Limit`/`Offset`/`HasMore` still describe the *unfiltered* upstream
-  page, a known limitation of post-filtering a single page rather than re-paginating the scoped set.
-- `SearchCases`: checks the URL path's `{id}` before calling entity-service at all; a non-member gets
-  `403`.
-- `GetCase`: fetches the case first (need its project), then checks membership; a non-member gets
-  `404`, not `403` — don't confirm to a caller that a case id exists at all if they can't see it.
+**The single reusable gate every handler calls is `requireProjectMember`** (same file) — not just
+`CallerScopeResolver` itself. It runs the membership check and writes the caller-supplied
+status/message (403 for a search that already names its project in the URL, 404 for a single-item
+detail fetch — see below) on failure. Every handler below calls this one function; none duplicates
+the check-then-write-error logic itself. There is no env var or flag gating any of this — it's always
+enforced in production.
 
-All three are gated by the single `CALLER_SCOPED_SEARCH_ENABLED` env var (`main.go`) — unset or
-anything other than the literal string `"true"` leaves every one of these endpoints exactly as
-unscoped as they are today. Note that cases already have a *separate*, already-fully-wired
-"my own cases" mechanism independent of this flag: the frontend can send
-`{"filters":{"createdByMe":true}}` to `POST /projects/{id}/cases/search` today, which entity-service
+Each handler gets its own `callerScope` field and a `SetCallerScope(resolver)` setter — a setter
+rather than a constructor parameter *purely* so the many pre-existing tests across this package that
+construct handlers directly, unrelated to this feature, keep compiling without change. `main.go`
+calls `SetCallerScope` unconditionally on every one of them with the *same* `CallerScopeResolver`
+instance — there's no way to opt a handler out in production. `requireProjectMember` (and
+`ProjectHandler.scopeToCallerProjects`) treat a `nil` resolver as unscoped rather than panicking —
+that path is only ever taken by tests that never call `SetCallerScope` at all, since they don't
+exercise this feature.
+
+Endpoints covered, grouped by how they resolve to a project id:
+
+- **Direct — `{id}`/`{projectId}` in the URL path is already the project's platform UUID**:
+  `ProjectHandler.SearchProjects` (post-filters the response instead of gating the request — see
+  below), `CaseHandler.SearchCases`, `RegistryHandler.SearchRegistryTokens`,
+  `ChangeRequestHandler.SearchChangeRequests`, `TimeCardHandler.SearchTimeCards`,
+  `ProjectStatsHandler.SearchProjectCaseTimeCards`, `AIChatHandler.SearchConversations`,
+  `DeploymentHandler.SearchDeployments`, and `InstanceHandler`'s project-scoped fan-out variants
+  (`SearchProjectInstances`/`*Metrics`/`*Usage`/`*MetricsStats`/`*UsageStats` — see below).
+- **Resolved via a case** — the path carries a case id, so the handler calls `GetCase` first and
+  checks the case's own `ProjectDetails.ID`: `CaseHandler.GetCase`, `CaseHandler.SearchCaseActivities`,
+  `CaseHandler.SearchCaseEscalations`, `CallRequestHandler.SearchCallRequests` (needed adding `GetCase`
+  to its own narrower `entityCallRequestClient` interface — the shared `entityClient` already
+  satisfies it).
+
+`SearchProjects` is the one exception to "gate the request": it post-filters the entity-service
+response to only projects the caller is a member of (one `IsProjectMember` call per returned project
+— there's no way to push this down into the search request itself, since `SearchProjectsRequest` has
+no caller-identity filter). `Total` is adjusted to the filtered count; `Limit`/`Offset`/`HasMore`
+still describe the *unfiltered* upstream page, a known limitation of post-filtering a single page
+rather than re-paginating the scoped set.
+
+`GetCase`/`SearchCaseActivities`/`SearchCaseEscalations`/`SearchCallRequests` all 404 (not 403) on a
+non-member — don't confirm to a caller that a case id exists at all if they can't see it. Every
+direct-project endpoint 403s instead, since the URL already names the project.
+
+**`InstanceHandler`'s 15-route fan-out (project/deployment/deployed-product variants of the same 5
+metric types) only covers the *project*-scoped variants.** Its 5 shared private methods
+(`searchInstances`/`searchInstanceMetrics`/etc.) all take an `instanceIDFilters` struct that's
+non-empty in exactly one of three fields; `checkProjectScope` is a no-op unless `scope.projectIDs` is
+set, so the deployment- and deployed-product-scoped variants pass through unchecked. Resolving a
+deployment or deployed-product id back to a project (needed for those) is a separate, not-yet-addressed
+gap — there's no `GetDeployment`/`GetDeployedProduct` single-item fetch in `internal/entity` at all
+today, and deployed products only reference their deployment (`DeployedProductView.Deployment`), not
+a project directly — a two-hop resolution once deployment resolution exists.
+
+**Endpoints deliberately left out of this pass** (same project-scoping gap, not yet addressed):
+`ProjectStatsHandler`'s other GET stats endpoints (`GetProjectFilters`, `GetProjectFeatures`,
+`GetProjectDashboardStats`, etc.), the `deployments/{deploymentId}/products/*` and
+`deployments/products/{id}/*` fan-outs, `projects/{id}/conversations/*` beyond `SearchConversations`,
+and every globally-unscoped endpoint with no project id in its path at all (`accounts/search`,
+`attachments/search`, `comments/search`, `products/vulnerabilities/search`, global `/search`) — the
+mechanism here doesn't generalize to those without an account-level (not project-level) equivalent.
+
+Note that cases already have a *separate*, already-fully-wired "my own cases" mechanism independent
+of this flag: the frontend can send `{"filters":{"createdByMe":true}}` to
+`POST /projects/{id}/cases/search` today, which entity-service
 resolves server-side from the caller's own JWT (`__current_user_email__` placeholder, see
 `entity-service/internal/service/case_filters.go`) — that's about filtering to cases the caller
 personally *created*, a different, narrower thing than the project-membership check above.

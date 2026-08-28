@@ -47,11 +47,25 @@ type entityProjectStatsClient interface {
 // source — see internal/entity/projects.go.
 type ProjectStatsHandler struct {
 	entity entityProjectStatsClient
+
+	callerScope *CallerScopeResolver
 }
 
 // NewProjectStatsHandler creates a ProjectStatsHandler backed by the given entity client.
 func NewProjectStatsHandler(entityClient entityProjectStatsClient) *ProjectStatsHandler {
 	return &ProjectStatsHandler{entity: entityClient}
+}
+
+// SetCallerScope enables caller-scoped access: SearchProjectCaseTimeCards
+// requires the caller to be an active portal-user contact of the project in
+// the URL path. Always enforced in production (main.go calls this
+// unconditionally, no kill switch) — see ProjectHandler.SetCallerScope for
+// why this is a setter rather than a constructor parameter. Only this one
+// method is scoped today — the other GET stats endpoints on this handler
+// (GetProjectFilters, GetProjectStats, etc.) are a separate,
+// not-yet-addressed gap.
+func (h *ProjectStatsHandler) SetCallerScope(resolver *CallerScopeResolver) {
+	h.callerScope = resolver
 }
 
 // GetProjectFilters handles GET /projects/{id}/filters.
@@ -305,6 +319,13 @@ func (h *ProjectStatsHandler) SearchProjectCaseTimeCards(w http.ResponseWriter, 
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {

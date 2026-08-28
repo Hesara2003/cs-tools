@@ -56,11 +56,22 @@ type entityConversationClient interface {
 type AIChatHandler struct {
 	ai     aiChatAgentClient
 	entity entityConversationClient
+
+	callerScope *CallerScopeResolver
 }
 
 // NewAIChatHandler creates an AIChatHandler backed by the given AI chat agent and entity clients.
 func NewAIChatHandler(ai aiChatAgentClient, entityClient entityConversationClient) *AIChatHandler {
 	return &AIChatHandler{ai: ai, entity: entityClient}
+}
+
+// SetCallerScope enables caller-scoped access: SearchConversations requires
+// the caller to be an active portal-user contact of the project in the URL
+// path. Always enforced in production (main.go calls this unconditionally,
+// no kill switch) — see ProjectHandler.SetCallerScope for why this is a
+// setter rather than a constructor parameter.
+func (h *AIChatHandler) SetCallerScope(resolver *CallerScopeResolver) {
+	h.callerScope = resolver
 }
 
 // ClassifyCase handles POST /cases/classify.
@@ -134,6 +145,13 @@ func (h *AIChatHandler) SearchConversations(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {

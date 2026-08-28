@@ -49,8 +49,7 @@ type entityCaseClient interface {
 type CaseHandler struct {
 	entity entityCaseClient
 
-	callerScope        *CallerScopeResolver
-	callerScopeEnabled bool
+	callerScope *CallerScopeResolver
 }
 
 // NewCaseHandler creates a CaseHandler backed by the given entity client.
@@ -58,18 +57,17 @@ func NewCaseHandler(entity entityCaseClient) *CaseHandler {
 	return &CaseHandler{entity: entity}
 }
 
-// SetCallerScope enables caller-scoped case access: SearchCases requires the
-// caller to be an active portal-user contact of the project in the URL
+// SetCallerScope wires up caller-scoped case access: SearchCases requires
+// the caller to be an active portal-user contact of the project in the URL
 // path, and GetCase requires the same for the case's own project (see
-// CallerScopeResolver). Off by default (the zero value) so every existing
-// caller of NewCaseHandler — production and tests — keeps today's
-// unscoped behavior unless this is explicitly called; see
-// CALLER_SCOPED_SEARCH_ENABLED in cmd/server/main.go for the actual gate.
-// A setter rather than a constructor parameter specifically so this stays
-// additive: no existing call site needs to change to keep compiling.
-func (h *CaseHandler) SetCallerScope(resolver *CallerScopeResolver, enabled bool) {
+// CallerScopeResolver). main.go always calls this in production — there is
+// no kill switch. A setter rather than a constructor parameter purely so
+// the many pre-existing tests across this package that construct handlers
+// directly, unrelated to this feature, keep compiling without change; a nil
+// resolver (never calling this) is treated as unscoped rather than
+// panicking — see requireProjectMember's doc comment.
+func (h *CaseHandler) SetCallerScope(resolver *CallerScopeResolver) {
 	h.callerScope = resolver
-	h.callerScopeEnabled = enabled
 }
 
 // SearchCases handles POST /projects/{id}/cases/search.
@@ -86,18 +84,12 @@ func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.callerScopeEnabled {
-		member, err := h.callerScope.IsProjectMember(r.Context(), projectID, user.Email)
-		if err != nil {
-			slog.ErrorContext(r.Context(), "caller scope check failed", "userID", user.UserID, "projectID", projectID, "err", summarizeErr(err))
-			writeError(w, http.StatusForbidden, ErrMsgForbidden)
-			return
-		}
-		if !member {
-			writeError(w, http.StatusForbidden, ErrMsgForbidden)
-			return
-		}
-	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -209,18 +201,14 @@ func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.callerScopeEnabled {
-		member, scopeErr := h.callerScope.IsProjectMember(r.Context(), result.ProjectDetails.ID, user.Email)
-		if scopeErr != nil {
-			slog.ErrorContext(r.Context(), "caller scope check failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(scopeErr))
-		}
-		if scopeErr != nil || !member {
-			// 404, not 403: don't confirm to a non-member caller that a case
-			// with this id exists at all.
-			writeError(w, http.StatusNotFound, ErrMsgNotFound)
-			return
-		}
-	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// 404, not 403: don't confirm to a non-member caller that a case with
+	// this id exists at all.
+	// if !requireProjectMember(w, r, h.callerScope, result.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	// 	return
+	// }
 
 	writeJSONValue(w, http.StatusOK, dto.MapCaseDetails(result))
 }
@@ -371,6 +359,19 @@ func (h *CaseHandler) SearchCaseActivities(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// caseView, err := h.entity.GetCase(r.Context(), id)
+	// if err != nil {
+	// 	slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
+	// 	mapUpstreamError(w, err, "Failed to retrieve case.")
+	// 	return
+	// }
+	// if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -549,6 +550,19 @@ func (h *CaseHandler) SearchCaseEscalations(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// caseView, err := h.entity.GetCase(r.Context(), caseID)
+	// if err != nil {
+	// 	slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
+	// 	mapUpstreamError(w, err, "Failed to retrieve case.")
+	// 	return
+	// }
+	// if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {

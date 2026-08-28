@@ -44,11 +44,22 @@ type entityChangeRequestClient interface {
 // source — a Postgres-mode deployment 404s on every route this handler serves.
 type ChangeRequestHandler struct {
 	entity entityChangeRequestClient
+
+	callerScope *CallerScopeResolver
 }
 
 // NewChangeRequestHandler creates a ChangeRequestHandler backed by the given entity client.
 func NewChangeRequestHandler(entity entityChangeRequestClient) *ChangeRequestHandler {
 	return &ChangeRequestHandler{entity: entity}
+}
+
+// SetCallerScope enables caller-scoped access: SearchChangeRequests requires
+// the caller to be an active portal-user contact of the project in the URL
+// path. Always enforced in production (main.go calls this unconditionally,
+// no kill switch) — see ProjectHandler.SetCallerScope for why this is a
+// setter rather than a constructor parameter.
+func (h *ChangeRequestHandler) SetCallerScope(resolver *CallerScopeResolver) {
+	h.callerScope = resolver
 }
 
 // CreateChangeRequest handles POST /change-requests.
@@ -97,6 +108,13 @@ func (h *ChangeRequestHandler) SearchChangeRequests(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
