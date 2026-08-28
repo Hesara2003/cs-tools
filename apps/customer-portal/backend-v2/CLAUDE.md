@@ -326,6 +326,41 @@ Like the registry service, several of this service's error responses are surface
 `writeUpstreamMessage` rather than `mapUpstreamError`'s generic fallback — see
 `usermanagement.extractErrorMessage`, which parses the upstream's own `{"message": "..."}` body.
 
+## Caller-scoped project/case search (`CALLER_SCOPED_SEARCH_ENABLED`, off by default)
+
+`POST /projects/search`, `POST /projects/{id}/cases/search`, and `GET /cases/{id}` currently return
+results for **any** authenticated caller regardless of which projects they actually belong to — there
+is no data model anywhere in this stack (entity-service, Postgres or ServiceNow-backed) that answers
+"which projects/cases does email X have access to" directly. The only real membership data that
+exists is the project-contact onboarding service above, and only in the *project → contacts*
+direction (`GetProjectContacts(projectID)`) — there is no bulk *email → projects* reverse lookup.
+
+`handler.CallerScopeResolver` (`internal/handler/caller_scope.go`) answers membership one project at
+a time instead: resolve the project's Salesforce ID via `entity.GetProject`, then check whether the
+caller's email appears in that project's contact list as an active `isPortalUser` entry. It's wired
+into `ProjectHandler`/`CaseHandler` via a `SetCallerScope(resolver, enabled)` setter — deliberately a
+setter rather than a constructor parameter, so every existing call site (production and tests) keeps
+compiling and behaving identically unless `main.go` explicitly opts a handler in.
+
+- `SearchProjects`: post-filters the entity-service response to only projects the caller is a member
+  of (one `IsProjectMember` call per returned project — there's no way to push this down into the
+  search request itself, since `SearchProjectsRequest` has no caller-identity filter). `Total` is
+  adjusted to the filtered count; `Limit`/`Offset`/`HasMore` still describe the *unfiltered* upstream
+  page, a known limitation of post-filtering a single page rather than re-paginating the scoped set.
+- `SearchCases`: checks the URL path's `{id}` before calling entity-service at all; a non-member gets
+  `403`.
+- `GetCase`: fetches the case first (need its project), then checks membership; a non-member gets
+  `404`, not `403` — don't confirm to a caller that a case id exists at all if they can't see it.
+
+All three are gated by the single `CALLER_SCOPED_SEARCH_ENABLED` env var (`main.go`) — unset or
+anything other than the literal string `"true"` leaves every one of these endpoints exactly as
+unscoped as they are today. Note that cases already have a *separate*, already-fully-wired
+"my own cases" mechanism independent of this flag: the frontend can send
+`{"filters":{"createdByMe":true}}` to `POST /projects/{id}/cases/search` today, which entity-service
+resolves server-side from the caller's own JWT (`__current_user_email__` placeholder, see
+`entity-service/internal/service/case_filters.go`) — that's about filtering to cases the caller
+personally *created*, a different, narrower thing than the project-membership check above.
+
 ## Instances — fan-out, not passed through
 
 `POST /projects/{id}/instances/*`, `/deployments/{id}/instances/*`, and

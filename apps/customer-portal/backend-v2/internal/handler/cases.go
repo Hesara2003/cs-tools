@@ -48,11 +48,28 @@ type entityCaseClient interface {
 // CaseHandler handles HTTP requests for case operations.
 type CaseHandler struct {
 	entity entityCaseClient
+
+	callerScope        *CallerScopeResolver
+	callerScopeEnabled bool
 }
 
 // NewCaseHandler creates a CaseHandler backed by the given entity client.
 func NewCaseHandler(entity entityCaseClient) *CaseHandler {
 	return &CaseHandler{entity: entity}
+}
+
+// SetCallerScope enables caller-scoped case access: SearchCases requires the
+// caller to be an active portal-user contact of the project in the URL
+// path, and GetCase requires the same for the case's own project (see
+// CallerScopeResolver). Off by default (the zero value) so every existing
+// caller of NewCaseHandler — production and tests — keeps today's
+// unscoped behavior unless this is explicitly called; see
+// CALLER_SCOPED_SEARCH_ENABLED in cmd/server/main.go for the actual gate.
+// A setter rather than a constructor parameter specifically so this stays
+// additive: no existing call site needs to change to keep compiling.
+func (h *CaseHandler) SetCallerScope(resolver *CallerScopeResolver, enabled bool) {
+	h.callerScope = resolver
+	h.callerScopeEnabled = enabled
 }
 
 // SearchCases handles POST /projects/{id}/cases/search.
@@ -67,6 +84,19 @@ func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 	if projectID == "" || !uuidRe.MatchString(projectID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
+	}
+
+	if h.callerScopeEnabled {
+		member, err := h.callerScope.IsProjectMember(r.Context(), projectID, user.Email)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "caller scope check failed", "userID", user.UserID, "projectID", projectID, "err", summarizeErr(err))
+			writeError(w, http.StatusForbidden, ErrMsgForbidden)
+			return
+		}
+		if !member {
+			writeError(w, http.StatusForbidden, ErrMsgForbidden)
+			return
+		}
 	}
 
 	body, ok := readJSONBody(w, r)
@@ -177,6 +207,19 @@ func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to retrieve case.")
 		return
+	}
+
+	if h.callerScopeEnabled {
+		member, scopeErr := h.callerScope.IsProjectMember(r.Context(), result.ProjectDetails.ID, user.Email)
+		if scopeErr != nil {
+			slog.ErrorContext(r.Context(), "caller scope check failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(scopeErr))
+		}
+		if scopeErr != nil || !member {
+			// 404, not 403: don't confirm to a non-member caller that a case
+			// with this id exists at all.
+			writeError(w, http.StatusNotFound, ErrMsgNotFound)
+			return
+		}
 	}
 
 	writeJSONValue(w, http.StatusOK, dto.MapCaseDetails(result))

@@ -36,11 +36,27 @@ type entityProjectClient interface {
 // ProjectHandler handles HTTP requests for project operations.
 type ProjectHandler struct {
 	entity entityProjectClient
+
+	callerScope        *CallerScopeResolver
+	callerScopeEnabled bool
 }
 
 // NewProjectHandler creates a ProjectHandler backed by the given entity client.
 func NewProjectHandler(entity entityProjectClient) *ProjectHandler {
 	return &ProjectHandler{entity: entity}
+}
+
+// SetCallerScope enables caller-scoped project search: SearchProjects only
+// returns projects the caller is an active portal-user contact of (see
+// CallerScopeResolver). Off by default (the zero value) so every existing
+// caller of NewProjectHandler — production and tests — keeps today's
+// unscoped behavior unless this is explicitly called; see
+// CALLER_SCOPED_SEARCH_ENABLED in cmd/server/main.go for the actual gate.
+// A setter rather than a constructor parameter specifically so this stays
+// additive: no existing call site needs to change to keep compiling.
+func (h *ProjectHandler) SetCallerScope(resolver *CallerScopeResolver, enabled bool) {
+	h.callerScope = resolver
+	h.callerScopeEnabled = enabled
 }
 
 // SearchProjects handles POST /projects/search.
@@ -69,7 +85,40 @@ func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if h.callerScopeEnabled {
+		result = h.scopeToCallerProjects(r.Context(), result, user.Email)
+	}
+
 	writeJSONValue(w, http.StatusOK, dto.MapSearchProjects(result))
+}
+
+// scopeToCallerProjects filters result to only the projects the caller is a
+// member of, checked one project at a time (see CallerScopeResolver — there
+// is no bulk query available). A project whose membership check itself
+// fails is excluded rather than included: fail closed, don't leak a project
+// just because an upstream call hiccuped.
+//
+// Total is adjusted to the filtered count; Limit/Offset/HasMore are left as
+// entity-service returned them, describing the unfiltered upstream page —
+// a known limitation of post-filtering a single page rather than
+// re-paginating the scoped result set. A caller with many projects spread
+// thin across pages could see a page come back smaller than its own Limit
+// even though more of their projects exist on a later upstream page.
+func (h *ProjectHandler) scopeToCallerProjects(ctx context.Context, result entity.SearchProjectsResponse, email string) entity.SearchProjectsResponse {
+	scoped := make([]entity.ProjectView, 0, len(result.Projects))
+	for _, p := range result.Projects {
+		member, err := h.callerScope.IsProjectMember(ctx, p.ID, email)
+		if err != nil {
+			slog.ErrorContext(ctx, "caller scope check failed", "projectID", p.ID, "err", summarizeErr(err))
+			continue
+		}
+		if member {
+			scoped = append(scoped, p)
+		}
+	}
+	result.Projects = scoped
+	result.Total = len(scoped)
+	return result
 }
 
 // GetProject handles GET /projects/{id}.
