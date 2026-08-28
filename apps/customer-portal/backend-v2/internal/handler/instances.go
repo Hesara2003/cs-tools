@@ -71,6 +71,13 @@ func (h *InstanceHandler) SetCallerScope(resolver *CallerScopeResolver) {
 // project-scoped filter (scope.projectIDs set — the other two ID slices are
 // always nil by construction, see instanceIDFilters); a no-op for the
 // deployment- and deployed-product-scoped variants.
+//
+// All 5 call sites below are deliberately commented out pending end-to-end
+// verification against real entity-service data (see the
+// requireProjectMember doc comment) — restore them rather than removing
+// this helper once that's done.
+//
+//nolint:unused // see comment above
 func (h *InstanceHandler) checkProjectScope(w http.ResponseWriter, r *http.Request, scope instanceIDFilters, userID, email string) bool {
 	if len(scope.projectIDs) == 0 {
 		return true
