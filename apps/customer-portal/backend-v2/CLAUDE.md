@@ -330,15 +330,24 @@ Like the registry service, several of this service's error responses are surface
 
 `POST /projects/search`, `POST /projects/{id}/cases/search`, and `GET /cases/{id}` currently return
 results for **any** authenticated caller regardless of which projects they actually belong to — there
-is no data model anywhere in this stack (entity-service, Postgres or ServiceNow-backed) that answers
-"which projects/cases does email X have access to" directly. The only real membership data that
-exists is the project-contact onboarding service above, and only in the *project → contacts*
-direction (`GetProjectContacts(projectID)`) — there is no bulk *email → projects* reverse lookup.
+is no bulk *email → projects* reverse lookup anywhere in this stack. But entity-service itself has a
+native, per-project forward lookup that CSM's backend already calls in production:
+`POST /projects/{id}/contacts/search` (`entity.SearchProjectContacts` here — see
+`entity-service/internal/handler/project_handler.go`'s `ProjectContactHandler`), whose
+`ProjectContact.GrantsCaseAccess` field is a purpose-built answer to "can this email actually see
+this project's cases" (ServiceNow's own access rule: a linked contact record *and* the invited
+address matching that record's own address). This is a **different, separate** system from the
+project-contact *onboarding* service above (`internal/usermanagement`, Salesforce-ID-keyed,
+`isPortalUser`/`isCsAdmin`/etc.) — don't confuse the two; an earlier version of this resolver used
+that one, but it required an extra `GetProject`→Salesforce-ID hop and a heuristic (`isPortalUser`)
+where entity-service already has an authoritative field, keyed on the same platform UUID everything
+else here already uses. ServiceNow data source only — no Postgres equivalent for project contacts.
 
 `handler.CallerScopeResolver` (`internal/handler/caller_scope.go`) answers membership one project at
-a time instead: resolve the project's Salesforce ID via `entity.GetProject`, then check whether the
-caller's email appears in that project's contact list as an active `isPortalUser` entry. It's wired
-into `ProjectHandler`/`CaseHandler` via a `SetCallerScope(resolver, enabled)` setter — deliberately a
+a time: page through `entity.SearchProjectContacts(projectID, ...)` (bounded —
+`callerScopeContactsLimit`/`callerScopeContactsMaxPages` — independent of what `Total` reports) and
+check for a case-insensitive email match with `GrantsCaseAccess: true`. It's wired into
+`ProjectHandler`/`CaseHandler` via a `SetCallerScope(resolver, enabled)` setter — deliberately a
 setter rather than a constructor parameter, so every existing call site (production and tests) keeps
 compiling and behaving identically unless `main.go` explicitly opts a handler in.
 

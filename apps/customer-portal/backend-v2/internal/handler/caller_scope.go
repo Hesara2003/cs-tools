@@ -19,46 +19,75 @@ package handler
 import (
 	"context"
 	"strings"
+
+	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
 )
 
-// CallerScopeResolver answers "is this email a portal-user contact of this
-// project". There is no bulk "which projects does this email belong to"
-// lookup anywhere in this stack (entity-service has no caller-identity
-// filter on project search, and the project-contact onboarding service
-// only exposes contacts-for-a-project, never projects-for-a-contact) — so
-// every scoping decision here is answered one project at a time, by
-// resolving the project's Salesforce ID and checking its contact list,
-// rather than via a reverse index.
+// callerScopeContactsLimit is the page size used to page through a
+// project's full contact list. CSM's own equivalent (webapp's
+// useSearchProjectContacts.ts) notes the largest contact list seen in
+// practice is ~103; this and callerScopeContactsMaxPages together bound the
+// scan regardless of what Total reports.
+const callerScopeContactsLimit = 100
+
+// callerScopeContactsMaxPages caps the scan at 1000 contacts — an
+// independent ceiling so a wrong or stuck Total can't turn this into an
+// unbounded fetch loop.
+const callerScopeContactsMaxPages = 10
+
+// entityProjectContactsClient is the subset of the entity client
+// CallerScopeResolver needs.
+type entityProjectContactsClient interface {
+	SearchProjectContacts(ctx context.Context, projectID string, req entity.SearchProjectContactsRequest) (entity.SearchProjectContactsResponse, error)
+}
+
+// CallerScopeResolver answers "does this email have case access to this
+// project" via entity-service's own native project-contacts search
+// (POST /projects/{id}/contacts/search — the same endpoint CSM's backend
+// already calls in production, entity.SearchProjectContacts here). There is
+// no bulk "which projects does this email belong to" lookup anywhere in
+// this stack, so membership is still checked one project at a time — but
+// unlike an earlier version of this resolver, it no longer needs the
+// separate project-contact *onboarding* service (internal/usermanagement,
+// Salesforce-ID-keyed): entity-service's ProjectContact.GrantsCaseAccess is
+// a purpose-built field answering exactly this question, keyed on the same
+// platform UUID every other entity-service call already uses.
+//
+// ServiceNow data source only (entity-service has no Postgres equivalent
+// for project contacts) — see entity-service's own ProjectContact doc
+// comment.
 type CallerScopeResolver struct {
-	entity   entityProjectResolver
-	contacts contactsClient
+	entity entityProjectContactsClient
 }
 
 // NewCallerScopeResolver constructs a CallerScopeResolver backed by the same
-// entity and project-contact onboarding service clients ContactHandler uses.
-func NewCallerScopeResolver(entityClient entityProjectResolver, contactsClient contactsClient) *CallerScopeResolver {
-	return &CallerScopeResolver{entity: entityClient, contacts: contactsClient}
+// entity client every other handler uses — no separate dependency needed.
+func NewCallerScopeResolver(entityClient entityProjectContactsClient) *CallerScopeResolver {
+	return &CallerScopeResolver{entity: entityClient}
 }
 
-// IsProjectMember reports whether email belongs to projectID as an active
-// portal-user contact. A non-nil error means the check itself failed
-// (upstream unavailable, unknown project, ...) — callers should treat that
-// the same as "not a member" (fail closed) rather than let an upstream
-// hiccup silently grant access.
+// IsProjectMember reports whether email has case access to projectID, per
+// entity-service's own GrantsCaseAccess rule. A non-nil error means the
+// check itself failed (upstream unavailable, unknown project, ...) —
+// callers should treat that the same as "not a member" (fail closed)
+// rather than let an upstream hiccup silently grant access.
 func (r *CallerScopeResolver) IsProjectMember(ctx context.Context, projectID, email string) (bool, error) {
-	project, err := r.entity.GetProject(ctx, projectID)
-	if err != nil {
-		return false, err
-	}
+	for page := 0; page < callerScopeContactsMaxPages; page++ {
+		resp, err := r.entity.SearchProjectContacts(ctx, projectID, entity.SearchProjectContactsRequest{
+			Pagination: entity.Pagination{Limit: callerScopeContactsLimit, Offset: page * callerScopeContactsLimit},
+		})
+		if err != nil {
+			return false, err
+		}
 
-	contacts, err := r.contacts.GetProjectContacts(ctx, project.SfID)
-	if err != nil {
-		return false, err
-	}
+		for _, c := range resp.Contacts {
+			if c.GrantsCaseAccess && strings.EqualFold(c.Email, email) {
+				return true, nil
+			}
+		}
 
-	for _, c := range contacts {
-		if c.IsPortalUser && strings.EqualFold(c.Email, email) {
-			return true, nil
+		if len(resp.Contacts) == 0 || page*callerScopeContactsLimit+len(resp.Contacts) >= resp.Total {
+			break
 		}
 	}
 	return false, nil

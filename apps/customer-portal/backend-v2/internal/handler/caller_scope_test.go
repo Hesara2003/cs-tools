@@ -25,68 +25,53 @@ import (
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
-	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/usermanagement"
 )
 
 const callerScopeTestProjectID = "22222222-2222-2222-2222-222222222222"
-const callerScopeTestSfID = "sf-001"
 const callerScopeTestEmail = "customer@example.com"
 
-// fakeEntityProjectResolver implements entityProjectResolver (and, since it
-// adds SearchProjects too, entityProjectClient) for both the
-// CallerScopeResolver tests and the ProjectHandler.SearchProjects tests.
-type fakeEntityProjectResolver struct {
-	project    entity.ProjectDetailsView
-	projectErr error
+// fakeEntityContacts implements entityProjectContactsClient, keyed by
+// project id.
+type fakeEntityContacts struct {
+	byProjectID    map[string][]entity.ProjectContact
+	errByProjectID map[string]error
+	// pages, if set, overrides byProjectID for pagination tests: each call
+	// pops the next entry, keyed by offset.
+	pagesByProjectID map[string]map[int]entity.SearchProjectContactsResponse
+}
 
+func (f *fakeEntityContacts) SearchProjectContacts(_ context.Context, projectID string, req entity.SearchProjectContactsRequest) (entity.SearchProjectContactsResponse, error) {
+	if err, ok := f.errByProjectID[projectID]; ok {
+		return entity.SearchProjectContactsResponse{}, err
+	}
+	if pages, ok := f.pagesByProjectID[projectID]; ok {
+		return pages[req.Pagination.Offset], nil
+	}
+	contacts := f.byProjectID[projectID]
+	return entity.SearchProjectContactsResponse{Contacts: contacts, Total: len(contacts)}, nil
+}
+
+// fakeEntityProjectResolver implements entityProjectClient (SearchProjects +
+// GetProject) for the ProjectHandler.SearchProjects tests.
+type fakeEntityProjectResolver struct {
 	searchResult entity.SearchProjectsResponse
 	searchErr    error
 }
 
-func (f *fakeEntityProjectResolver) GetProject(_ context.Context, _ string) (entity.ProjectDetailsView, error) {
-	return f.project, f.projectErr
+func (f *fakeEntityProjectResolver) GetProject(_ context.Context, id string) (entity.ProjectDetailsView, error) {
+	return entity.ProjectDetailsView{ID: id}, nil
 }
 
 func (f *fakeEntityProjectResolver) SearchProjects(_ context.Context, _ entity.SearchProjectsRequest) (entity.SearchProjectsResponse, error) {
 	return f.searchResult, f.searchErr
 }
 
-// fakeContactsClient implements contactsClient; only GetProjectContacts is
-// exercised by these tests.
-type fakeContactsClient struct {
-	contacts    []usermanagement.Contact
-	contactsErr error
-}
-
-func (f *fakeContactsClient) GetProjectContacts(_ context.Context, _ string) ([]usermanagement.Contact, error) {
-	return f.contacts, f.contactsErr
-}
-
-func (f *fakeContactsClient) CreateProjectContact(context.Context, string, usermanagement.OnBoardContactPayload) (usermanagement.Membership, error) {
-	return usermanagement.Membership{}, errors.New("not implemented")
-}
-
-func (f *fakeContactsClient) RemoveProjectContact(context.Context, string, string, string) (usermanagement.Membership, error) {
-	return usermanagement.Membership{}, errors.New("not implemented")
-}
-
-func (f *fakeContactsClient) UpdateMembershipRole(context.Context, string, string, usermanagement.MembershipRolePayload) (usermanagement.Membership, error) {
-	return usermanagement.Membership{}, errors.New("not implemented")
-}
-
-func (f *fakeContactsClient) ValidateProjectContact(context.Context, usermanagement.ValidationPayload) (*usermanagement.Contact, bool, error) {
-	return nil, false, errors.New("not implemented")
-}
-
 func TestCallerScopeResolver_IsProjectMember(t *testing.T) {
-	project := entity.ProjectDetailsView{ID: callerScopeTestProjectID, SfID: callerScopeTestSfID}
-
-	t.Run("true for a matching portal-user contact, case-insensitive", func(t *testing.T) {
-		entityFake := &fakeEntityProjectResolver{project: project}
-		contactsFake := &fakeContactsClient{contacts: []usermanagement.Contact{
-			{Email: "Customer@Example.com", IsPortalUser: true},
+	t.Run("true for a matching contact that grants case access, case-insensitive", func(t *testing.T) {
+		fake := &fakeEntityContacts{byProjectID: map[string][]entity.ProjectContact{
+			callerScopeTestProjectID: {{Email: "Customer@Example.com", GrantsCaseAccess: true}},
 		}}
-		r := NewCallerScopeResolver(entityFake, contactsFake)
+		r := NewCallerScopeResolver(fake)
 
 		member, err := r.IsProjectMember(context.Background(), callerScopeTestProjectID, callerScopeTestEmail)
 		if err != nil || !member {
@@ -94,12 +79,11 @@ func TestCallerScopeResolver_IsProjectMember(t *testing.T) {
 		}
 	})
 
-	t.Run("false when the matching contact is not a portal user", func(t *testing.T) {
-		entityFake := &fakeEntityProjectResolver{project: project}
-		contactsFake := &fakeContactsClient{contacts: []usermanagement.Contact{
-			{Email: callerScopeTestEmail, IsPortalUser: false},
+	t.Run("false when the matching contact does not grant case access", func(t *testing.T) {
+		fake := &fakeEntityContacts{byProjectID: map[string][]entity.ProjectContact{
+			callerScopeTestProjectID: {{Email: callerScopeTestEmail, GrantsCaseAccess: false}},
 		}}
-		r := NewCallerScopeResolver(entityFake, contactsFake)
+		r := NewCallerScopeResolver(fake)
 
 		member, err := r.IsProjectMember(context.Background(), callerScopeTestProjectID, callerScopeTestEmail)
 		if err != nil || member {
@@ -108,11 +92,10 @@ func TestCallerScopeResolver_IsProjectMember(t *testing.T) {
 	})
 
 	t.Run("false when no contact matches the email", func(t *testing.T) {
-		entityFake := &fakeEntityProjectResolver{project: project}
-		contactsFake := &fakeContactsClient{contacts: []usermanagement.Contact{
-			{Email: "someone-else@example.com", IsPortalUser: true},
+		fake := &fakeEntityContacts{byProjectID: map[string][]entity.ProjectContact{
+			callerScopeTestProjectID: {{Email: "someone-else@example.com", GrantsCaseAccess: true}},
 		}}
-		r := NewCallerScopeResolver(entityFake, contactsFake)
+		r := NewCallerScopeResolver(fake)
 
 		member, err := r.IsProjectMember(context.Background(), callerScopeTestProjectID, callerScopeTestEmail)
 		if err != nil || member {
@@ -120,11 +103,10 @@ func TestCallerScopeResolver_IsProjectMember(t *testing.T) {
 		}
 	})
 
-	t.Run("propagates a GetProject failure without calling contacts", func(t *testing.T) {
+	t.Run("propagates a SearchProjectContacts failure", func(t *testing.T) {
 		wantErr := errors.New("upstream down")
-		entityFake := &fakeEntityProjectResolver{projectErr: wantErr}
-		contactsFake := &fakeContactsClient{contacts: []usermanagement.Contact{{Email: callerScopeTestEmail, IsPortalUser: true}}}
-		r := NewCallerScopeResolver(entityFake, contactsFake)
+		fake := &fakeEntityContacts{errByProjectID: map[string]error{callerScopeTestProjectID: wantErr}}
+		r := NewCallerScopeResolver(fake)
 
 		member, err := r.IsProjectMember(context.Background(), callerScopeTestProjectID, callerScopeTestEmail)
 		if member || !errors.Is(err, wantErr) {
@@ -132,15 +114,20 @@ func TestCallerScopeResolver_IsProjectMember(t *testing.T) {
 		}
 	})
 
-	t.Run("propagates a GetProjectContacts failure", func(t *testing.T) {
-		wantErr := errors.New("contacts service down")
-		entityFake := &fakeEntityProjectResolver{project: project}
-		contactsFake := &fakeContactsClient{contactsErr: wantErr}
-		r := NewCallerScopeResolver(entityFake, contactsFake)
+	t.Run("pages through the full contact list to find a later match", func(t *testing.T) {
+		fake := &fakeEntityContacts{pagesByProjectID: map[string]map[int]entity.SearchProjectContactsResponse{
+			callerScopeTestProjectID: {
+				0: {Contacts: []entity.ProjectContact{{Email: "someone-else@example.com", GrantsCaseAccess: true}}, Total: 2},
+				callerScopeContactsLimit: {
+					Contacts: []entity.ProjectContact{{Email: callerScopeTestEmail, GrantsCaseAccess: true}}, Total: 2,
+				},
+			},
+		}}
+		r := NewCallerScopeResolver(fake)
 
 		member, err := r.IsProjectMember(context.Background(), callerScopeTestProjectID, callerScopeTestEmail)
-		if member || !errors.Is(err, wantErr) {
-			t.Fatalf("IsProjectMember = (%v, %v), want (false, %v)", member, err, wantErr)
+		if err != nil || !member {
+			t.Fatalf("IsProjectMember = (%v, %v), want (true, nil)", member, err)
 		}
 	})
 }
@@ -156,16 +143,16 @@ func TestProjectHandler_SearchProjects_CallerScope(t *testing.T) {
 			Total:    3,
 		},
 	}
-	contactsFake := &fakeContactsByProject{
-		byProjectID: map[string][]usermanagement.Contact{
-			"member-project": {{Email: callerScopeTestEmail, IsPortalUser: true}},
-			"other-project":  {{Email: "someone-else@example.com", IsPortalUser: true}},
+	contactsFake := &fakeEntityContacts{
+		byProjectID: map[string][]entity.ProjectContact{
+			"member-project": {{Email: callerScopeTestEmail, GrantsCaseAccess: true}},
+			"other-project":  {{Email: "someone-else@example.com", GrantsCaseAccess: true}},
 		},
 		errByProjectID: map[string]error{
 			"error-project": errors.New("upstream hiccup"),
 		},
 	}
-	resolver := NewCallerScopeResolver(&projectIDPassthroughResolver{}, contactsFake)
+	resolver := NewCallerScopeResolver(contactsFake)
 
 	h := NewProjectHandler(entityFake)
 	h.SetCallerScope(resolver, true)
@@ -202,12 +189,12 @@ func TestProjectHandler_SearchProjects_CallerScopeDisabledByDefault(t *testing.T
 }
 
 func TestCaseHandler_SearchCases_CallerScope(t *testing.T) {
-	contactsFake := &fakeContactsByProject{
-		byProjectID: map[string][]usermanagement.Contact{
-			testProjectID: {{Email: callerScopeTestEmail, IsPortalUser: true}},
+	contactsFake := &fakeEntityContacts{
+		byProjectID: map[string][]entity.ProjectContact{
+			testProjectID: {{Email: callerScopeTestEmail, GrantsCaseAccess: true}},
 		},
 	}
-	resolver := NewCallerScopeResolver(&projectIDPassthroughResolver{}, contactsFake)
+	resolver := NewCallerScopeResolver(contactsFake)
 
 	t.Run("member can search", func(t *testing.T) {
 		fake := &fakeEntityCaseClient{}
@@ -244,12 +231,12 @@ func TestCaseHandler_SearchCases_CallerScope(t *testing.T) {
 }
 
 func TestCaseHandler_GetCase_CallerScope(t *testing.T) {
-	contactsFake := &fakeContactsByProject{
-		byProjectID: map[string][]usermanagement.Contact{
-			testProjectID: {{Email: callerScopeTestEmail, IsPortalUser: true}},
+	contactsFake := &fakeEntityContacts{
+		byProjectID: map[string][]entity.ProjectContact{
+			testProjectID: {{Email: callerScopeTestEmail, GrantsCaseAccess: true}},
 		},
 	}
-	resolver := NewCallerScopeResolver(&projectIDPassthroughResolver{}, contactsFake)
+	resolver := NewCallerScopeResolver(contactsFake)
 
 	t.Run("member can view the case", func(t *testing.T) {
 		fake := &fakeEntityCaseClientForCase{caseView: entity.CaseView{ID: "case-1", ProjectDetails: entity.EntityRef{ID: testProjectID}}}
@@ -294,44 +281,4 @@ type fakeEntityCaseClientForCase struct {
 
 func (f *fakeEntityCaseClientForCase) GetCase(_ context.Context, _ string) (entity.CaseView, error) {
 	return f.caseView, nil
-}
-
-// projectIDPassthroughResolver is an entityProjectResolver whose GetProject
-// echoes the requested id back as both ID and SfID, so tests can key
-// fakeContactsByProject directly by the project id used in the request
-// rather than needing a separate Salesforce id mapping.
-type projectIDPassthroughResolver struct{}
-
-func (projectIDPassthroughResolver) GetProject(_ context.Context, id string) (entity.ProjectDetailsView, error) {
-	return entity.ProjectDetailsView{ID: id, SfID: id}, nil
-}
-
-// fakeContactsByProject is a contactsClient keyed by project id (via
-// projectIDPassthroughResolver, standing in for the Salesforce id).
-type fakeContactsByProject struct {
-	byProjectID    map[string][]usermanagement.Contact
-	errByProjectID map[string]error
-}
-
-func (f *fakeContactsByProject) GetProjectContacts(_ context.Context, projectID string) ([]usermanagement.Contact, error) {
-	if err, ok := f.errByProjectID[projectID]; ok {
-		return nil, err
-	}
-	return f.byProjectID[projectID], nil
-}
-
-func (f *fakeContactsByProject) CreateProjectContact(context.Context, string, usermanagement.OnBoardContactPayload) (usermanagement.Membership, error) {
-	return usermanagement.Membership{}, errors.New("not implemented")
-}
-
-func (f *fakeContactsByProject) RemoveProjectContact(context.Context, string, string, string) (usermanagement.Membership, error) {
-	return usermanagement.Membership{}, errors.New("not implemented")
-}
-
-func (f *fakeContactsByProject) UpdateMembershipRole(context.Context, string, string, usermanagement.MembershipRolePayload) (usermanagement.Membership, error) {
-	return usermanagement.Membership{}, errors.New("not implemented")
-}
-
-func (f *fakeContactsByProject) ValidateProjectContact(context.Context, usermanagement.ValidationPayload) (*usermanagement.Contact, bool, error) {
-	return nil, false, errors.New("not implemented")
 }

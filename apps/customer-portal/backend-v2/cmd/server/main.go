@@ -193,12 +193,14 @@ func main() {
 	// Caller-scoped project/case search — off by default. See
 	// handler.CallerScopeResolver: there is no bulk "projects for this
 	// email" lookup anywhere upstream, so membership is checked one project
-	// at a time via the project-contact onboarding service. Kept behind an
-	// explicit kill switch (default off, only "true" turns it on) so this
-	// can ship and be verified without changing SearchProjects/SearchCases/
-	// GetCase's behavior for any existing caller until it's confirmed
-	// working end-to-end.
-	callerScopeResolver := handler.NewCallerScopeResolver(entityClient, userManagementClient)
+	// at a time via entity-service's own native project-contacts search
+	// (the same endpoint CSM's backend already calls in production) —
+	// no separate dependency beyond entityClient. Kept behind an explicit
+	// kill switch (default off, only "true" turns it on) so this can ship
+	// and be verified without changing SearchProjects/SearchCases/GetCase's
+	// behavior for any existing caller until it's confirmed working
+	// end-to-end.
+	callerScopeResolver := handler.NewCallerScopeResolver(entityClient)
 	callerScopedSearchEnabled := os.Getenv("CALLER_SCOPED_SEARCH_ENABLED") == "true"
 	projectHandler.SetCallerScope(callerScopeResolver, callerScopedSearchEnabled)
 	caseHandler.SetCallerScope(callerScopeResolver, callerScopedSearchEnabled)
