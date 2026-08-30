@@ -370,23 +370,27 @@ Endpoints covered, grouped by how they resolve to a project id:
   `ProjectHandler.SearchProjects` (post-filters the response instead of gating the request — see
   below), `CaseHandler.SearchCases`, `RegistryHandler.SearchRegistryTokens`,
   `ChangeRequestHandler.SearchChangeRequests`, `TimeCardHandler.SearchTimeCards`,
-  `ProjectStatsHandler.SearchProjectCaseTimeCards`, `AIChatHandler.SearchConversations`,
-  `DeploymentHandler.SearchDeployments`, and `InstanceHandler`'s project-scoped fan-out variants
-  (`SearchProjectInstances`/`*Metrics`/`*Usage`/`*MetricsStats`/`*UsageStats` — see below).
-- **Resolved via a case** — the path carries a case id, so the handler calls `GetCase` first and
-  checks the case's own `ProjectDetails.ID`: `CaseHandler.GetCase`, `CaseHandler.SearchCaseActivities`,
-  `CaseHandler.SearchCaseEscalations`, `CallRequestHandler.SearchCallRequests` (needed adding `GetCase`
-  to its own narrower `entityCallRequestClient` interface — the shared `entityClient` already
-  satisfies it).
+  `DeploymentHandler.SearchDeployments`, all 10 `ProjectStatsHandler` endpoints
+  (`SearchProjectCaseTimeCards`, `GetProjectFilters`, `GetProjectFeatures`,
+  `GetProjectDashboardStats`, `GetProjectCaseStats`, `GetProjectConversationStats`,
+  `GetProjectSupportStats`, `GetProjectTimeCardStats`, `GetProjectChangeRequestStats`,
+  `GetProjectUsageStats`), `AIChatHandler`'s direct-project endpoints (`SearchConversations`,
+  `CreateConversation`, `SendConversationMessage`, `GetConversationSummary`), and `InstanceHandler`'s
+  project-scoped fan-out variants (`SearchProjectInstances`/`*Metrics`/`*Usage`/`*MetricsStats`/`*UsageStats` — see below).
+- **Resolved via a case or conversation** — the path carries a case/conversation id, so the handler
+  fetches the resource first and checks `ProjectDetails.ID` / `Project.ID`: `CaseHandler.GetCase`,
+  `CaseHandler.SearchCaseActivities`, `CaseHandler.SearchCaseEscalations`,
+  `CallRequestHandler.SearchCallRequests`, `AIChatHandler.GetConversation`,
+  `AIChatHandler.UpdateConversation`, `AIChatHandler.GetConversationMessages`.
 
 `SearchProjects` is the one exception to "gate the request": it scans entity-service project search
 results in 50-item batches (up to 10 pages / 500 projects ceiling), checks `IsProjectMember` for each
 project, collects all accessible projects, and applies client-side slice pagination (`Offset` and
 `Limit`). `Total` (`totalRecords`) and `HasMore` accurately describe the caller's scoped matching set.
 
-`GetCase`/`SearchCaseActivities`/`SearchCaseEscalations`/`SearchCallRequests` all 404 (not 403) on a
-non-member — don't confirm to a caller that a case id exists at all if they can't see it. Every
-direct-project endpoint 403s instead, since the URL already names the project.
+`GetCase`/`SearchCaseActivities`/`SearchCaseEscalations`/`SearchCallRequests`/`GetConversation`/`UpdateConversation`/`GetConversationMessages`
+all 404 (not 403) on a non-member — don't confirm to a caller that a resource id exists at all if they
+can't see it. Every direct-project endpoint 403s instead, since the URL already names the project.
 
 **`InstanceHandler`'s 15-route fan-out (project/deployment/deployed-product variants of the same 5
 metric types) only covers the *project*-scoped variants.** Its 5 shared private methods
@@ -398,10 +402,8 @@ gap — there's no `GetDeployment`/`GetDeployedProduct` single-item fetch in `in
 today, and deployed products only reference their deployment (`DeployedProductView.Deployment`), not
 a project directly — a two-hop resolution once deployment resolution exists.
 
-**Endpoints deliberately left out of this pass** (same project-scoping gap, not yet addressed):
-`ProjectStatsHandler`'s other GET stats endpoints (`GetProjectFilters`, `GetProjectFeatures`,
-`GetProjectDashboardStats`, etc.), the `deployments/{deploymentId}/products/*` and
-`deployments/products/{id}/*` fan-outs, `projects/{id}/conversations/*` beyond `SearchConversations`,
+**Endpoints deliberately left out of this pass** (deployment/deployed-product or global resolution gap):
+the `deployments/{deploymentId}/products/*` and `deployments/products/{id}/*` fan-outs,
 and every globally-unscoped endpoint with no project id in its path at all (`accounts/search`,
 `attachments/search`, `comments/search`, `products/vulnerabilities/search`, global `/search`) — the
 mechanism here doesn't generalize to those without an account-level (not project-level) equivalent.

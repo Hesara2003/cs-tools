@@ -56,14 +56,11 @@ func NewProjectStatsHandler(entityClient entityProjectStatsClient) *ProjectStats
 	return &ProjectStatsHandler{entity: entityClient}
 }
 
-// SetCallerScope enables caller-scoped access: SearchProjectCaseTimeCards
-// requires the caller to be an active portal-user contact of the project in
-// the URL path. Always enforced in production (main.go calls this
+// SetCallerScope enables caller-scoped access: all project-scoped metadata and
+// statistics routes require the caller to be an active portal-user contact of
+// the project in the URL path. Always enforced in production (main.go calls this
 // unconditionally, no kill switch) — see ProjectHandler.SetCallerScope for
-// why this is a setter rather than a constructor parameter. Only this one
-// method is scoped today — the other GET stats endpoints on this handler
-// (GetProjectFilters, GetProjectStats, etc.) are a separate,
-// not-yet-addressed gap.
+// why this is a setter rather than a constructor parameter.
 func (h *ProjectStatsHandler) SetCallerScope(resolver *CallerScopeResolver) {
 	h.callerScope = resolver
 }
@@ -79,6 +76,10 @@ func (h *ProjectStatsHandler) GetProjectFilters(w http.ResponseWriter, r *http.R
 	id := r.PathValue("id")
 	if id == "" || !uuidRe.MatchString(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
 		return
 	}
 
@@ -106,6 +107,10 @@ func (h *ProjectStatsHandler) GetProjectFeatures(w http.ResponseWriter, r *http.
 		return
 	}
 
+	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+		return
+	}
+
 	result, err := h.entity.GetProjectMetadata(r.Context(), id)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetProjectMetadata failed", "userID", user.UserID, "projectID", id, "err", summarizeErr(err))
@@ -130,6 +135,10 @@ func (h *ProjectStatsHandler) GetProjectDashboardStats(w http.ResponseWriter, r 
 	id := r.PathValue("id")
 	if id == "" || !uuidRe.MatchString(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
 		return
 	}
 
@@ -181,6 +190,10 @@ func (h *ProjectStatsHandler) GetProjectCaseStats(w http.ResponseWriter, r *http
 		return
 	}
 
+	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+		return
+	}
+
 	result, err := h.entity.GetProjectCaseStats(r.Context(), id, r.URL.Query()["caseTypes"], r.URL.Query().Get("createdBy"))
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetProjectCaseStats failed", "userID", user.UserID, "projectID", id, "err", summarizeErr(err))
@@ -202,6 +215,10 @@ func (h *ProjectStatsHandler) GetProjectConversationStats(w http.ResponseWriter,
 	id := r.PathValue("id")
 	if id == "" || !uuidRe.MatchString(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
 		return
 	}
 
@@ -228,6 +245,10 @@ func (h *ProjectStatsHandler) GetProjectSupportStats(w http.ResponseWriter, r *h
 	id := r.PathValue("id")
 	if id == "" || !uuidRe.MatchString(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
 		return
 	}
 
@@ -265,6 +286,10 @@ func (h *ProjectStatsHandler) GetProjectTimeCardStats(w http.ResponseWriter, r *
 		return
 	}
 
+	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+		return
+	}
+
 	startDate := r.URL.Query().Get("startDate")
 	endDate := r.URL.Query().Get("endDate")
 	if !validateDateParams(w, dateParam{"startDate", startDate}, dateParam{"endDate", endDate}) {
@@ -292,6 +317,10 @@ func (h *ProjectStatsHandler) GetProjectChangeRequestStats(w http.ResponseWriter
 	id := r.PathValue("id")
 	if id == "" || !uuidRe.MatchString(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
 		return
 	}
 
@@ -368,6 +397,10 @@ func (h *ProjectStatsHandler) GetProjectUsageStats(w http.ResponseWriter, r *htt
 	id := r.PathValue("id")
 	if id == "" || !uuidRe.MatchString(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
 		return
 	}
 

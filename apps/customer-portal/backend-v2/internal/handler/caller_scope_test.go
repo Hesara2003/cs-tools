@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/aichatagent"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
 )
 
@@ -563,6 +564,261 @@ func TestInstanceHandler_CallerScope(t *testing.T) {
 
 		if rec.Code != http.StatusOK || !fake.called {
 			t.Fatalf("expected 200 and entity call (no-op check), got %d (called=%v): %s", rec.Code, fake.called, rec.Body.String())
+		}
+	})
+}
+
+// fakeEntityProjectStatsClient mocks entity-service calls for ProjectStatsHandler.
+type fakeEntityProjectStatsClient struct {
+	entityProjectStatsClient
+}
+
+func (f *fakeEntityProjectStatsClient) GetProjectMetadata(_ context.Context, _ string) (entity.ProjectMetadataResponse, error) {
+	return entity.ProjectMetadataResponse{}, nil
+}
+func (f *fakeEntityProjectStatsClient) GetProjectCaseStats(_ context.Context, _ string, _ []string, _ string) (entity.ProjectCaseStatsResponse, error) {
+	return entity.ProjectCaseStatsResponse{}, nil
+}
+func (f *fakeEntityProjectStatsClient) GetProjectConversationStats(_ context.Context, _ string, _ string) (entity.ProjectConversationStatsResponse, error) {
+	return entity.ProjectConversationStatsResponse{}, nil
+}
+func (f *fakeEntityProjectStatsClient) GetProjectDeploymentStats(_ context.Context, _ string) (entity.ProjectDeploymentStatsResponse, error) {
+	return entity.ProjectDeploymentStatsResponse{}, nil
+}
+func (f *fakeEntityProjectStatsClient) GetProjectStats(_ context.Context, _ string) (entity.ProjectStatsResponse, error) {
+	return entity.ProjectStatsResponse{}, nil
+}
+func (f *fakeEntityProjectStatsClient) GetProjectTimeCardStats(_ context.Context, _, _, _ string) (entity.ProjectTimeCardStatsResponse, error) {
+	return entity.ProjectTimeCardStatsResponse{}, nil
+}
+func (f *fakeEntityProjectStatsClient) GetProjectChangeRequestStats(_ context.Context, _ string) (entity.ProjectChangeRequestStatsResponse, error) {
+	return entity.ProjectChangeRequestStatsResponse{}, nil
+}
+
+func TestProjectStatsHandler_CallerScope(t *testing.T) {
+	contactsFake := &fakeEntityContacts{
+		byProjectID: map[string][]entity.ProjectContact{
+			testProjectID: {{Email: callerScopeTestEmail, GrantsCaseAccess: true}},
+		},
+	}
+	resolver := NewCallerScopeResolver(contactsFake)
+
+	h := NewProjectStatsHandler(&fakeEntityProjectStatsClient{})
+	h.SetCallerScope(resolver)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /projects/{id}/filters", h.GetProjectFilters)
+	mux.HandleFunc("GET /projects/{id}/features", h.GetProjectFeatures)
+	mux.HandleFunc("GET /projects/{id}/stats", h.GetProjectDashboardStats)
+	mux.HandleFunc("GET /projects/{id}/stats/cases", h.GetProjectCaseStats)
+	mux.HandleFunc("GET /projects/{id}/stats/conversations", h.GetProjectConversationStats)
+	mux.HandleFunc("GET /projects/{id}/stats/support", h.GetProjectSupportStats)
+	mux.HandleFunc("GET /projects/{id}/stats/time-cards", h.GetProjectTimeCardStats)
+	mux.HandleFunc("GET /projects/{id}/stats/change-requests", h.GetProjectChangeRequestStats)
+	mux.HandleFunc("GET /projects/{id}/stats/usage", h.GetProjectUsageStats)
+
+	endpoints := []struct {
+		name string
+		path string
+	}{
+		{"filters", "/projects/%s/filters"},
+		{"features", "/projects/%s/features"},
+		{"dashboard stats", "/projects/%s/stats"},
+		{"case stats", "/projects/%s/stats/cases"},
+		{"conversation stats", "/projects/%s/stats/conversations"},
+		{"support stats", "/projects/%s/stats/support"},
+		{"time-cards stats", "/projects/%s/stats/time-cards"},
+		{"change-requests stats", "/projects/%s/stats/change-requests"},
+		{"usage stats", "/projects/%s/stats/usage"},
+	}
+
+	for _, ep := range endpoints {
+		t.Run(ep.name+": member can view", func(t *testing.T) {
+			req := authedRequest(http.MethodGet, strings.ReplaceAll(ep.path, "%s", testProjectID), "")
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+		})
+
+		t.Run(ep.name+": non-member is forbidden", func(t *testing.T) {
+			otherProjectID := "88888888-8888-8888-8888-888888888888"
+			req := authedRequest(http.MethodGet, strings.ReplaceAll(ep.path, "%s", otherProjectID), "")
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+type fakeAIChatAgentClient struct {
+	aiChatAgentClient
+}
+
+func (f *fakeAIChatAgentClient) CreateChat(_ context.Context, _ aichatagent.ChatPayload) (aichatagent.ChatResponse, error) {
+	return aichatagent.ChatResponse{}, nil
+}
+func (f *fakeAIChatAgentClient) GetConversationSummary(_ context.Context, _, _ string) (aichatagent.ConversationSummaryResponse, error) {
+	return aichatagent.ConversationSummaryResponse{}, nil
+}
+
+type fakeEntityConversationClient struct {
+	entityConversationClient
+	conv entity.ConversationDetails
+}
+
+func (f *fakeEntityConversationClient) CreateConversation(_ context.Context, _ entity.CreateConversationRequest) (entity.CreateConversationResponse, error) {
+	return entity.CreateConversationResponse{Conversation: entity.CreatedConversation{ID: "conv-1"}}, nil
+}
+func (f *fakeEntityConversationClient) CreateComment(_ context.Context, _ entity.CreateCommentRequest) (entity.CreateCommentResponse, error) {
+	return entity.CreateCommentResponse{}, nil
+}
+func (f *fakeEntityConversationClient) GetConversation(_ context.Context, _ string) (entity.ConversationDetails, error) {
+	return f.conv, nil
+}
+func (f *fakeEntityConversationClient) UpdateConversation(_ context.Context, _ string, _ entity.UpdateConversationRequest) (entity.UpdateConversationResponse, error) {
+	return entity.UpdateConversationResponse{}, nil
+}
+func (f *fakeEntityConversationClient) SearchComments(_ context.Context, _ entity.SearchCommentsRequest) (entity.SearchCommentsResponse, error) {
+	return entity.SearchCommentsResponse{}, nil
+}
+
+func TestAIChatHandler_CallerScope(t *testing.T) {
+	contactsFake := &fakeEntityContacts{
+		byProjectID: map[string][]entity.ProjectContact{
+			testProjectID: {{Email: callerScopeTestEmail, GrantsCaseAccess: true}},
+		},
+	}
+	resolver := NewCallerScopeResolver(contactsFake)
+
+	t.Run("CreateConversation: member can create", func(t *testing.T) {
+		h := NewAIChatHandler(&fakeAIChatAgentClient{}, &fakeEntityConversationClient{})
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /projects/{id}/conversations", h.CreateConversation)
+		req := authedRequest(http.MethodPost, "/projects/"+testProjectID+"/conversations", `{"message":"hello"}`)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("CreateConversation: non-member is forbidden", func(t *testing.T) {
+		otherProjectID := "88888888-8888-8888-8888-888888888888"
+		h := NewAIChatHandler(&fakeAIChatAgentClient{}, &fakeEntityConversationClient{})
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /projects/{id}/conversations", h.CreateConversation)
+		req := authedRequest(http.MethodPost, "/projects/"+otherProjectID+"/conversations", `{"message":"hello"}`)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("SendConversationMessage: member can send", func(t *testing.T) {
+		h := NewAIChatHandler(&fakeAIChatAgentClient{}, &fakeEntityConversationClient{})
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /projects/{projectId}/conversations/{conversationId}/messages", h.SendConversationMessage)
+		req := authedRequest(http.MethodPost, "/projects/"+testProjectID+"/conversations/11111111-1111-1111-1111-111111111111/messages", `{"message":"hello"}`)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("SendConversationMessage: non-member is forbidden", func(t *testing.T) {
+		otherProjectID := "88888888-8888-8888-8888-888888888888"
+		h := NewAIChatHandler(&fakeAIChatAgentClient{}, &fakeEntityConversationClient{})
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /projects/{projectId}/conversations/{conversationId}/messages", h.SendConversationMessage)
+		req := authedRequest(http.MethodPost, "/projects/"+otherProjectID+"/conversations/11111111-1111-1111-1111-111111111111/messages", `{"message":"hello"}`)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("GetConversation: member can view", func(t *testing.T) {
+		fake := &fakeEntityConversationClient{conv: entity.ConversationDetails{Project: &entity.EntityRef{ID: testProjectID}}}
+		h := NewAIChatHandler(&fakeAIChatAgentClient{}, fake)
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /conversations/{id}", h.GetConversation)
+		req := authedRequest(http.MethodGet, "/conversations/11111111-1111-1111-1111-111111111111", "")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("GetConversation: non-member gets 404", func(t *testing.T) {
+		otherProjectID := "88888888-8888-8888-8888-888888888888"
+		fake := &fakeEntityConversationClient{conv: entity.ConversationDetails{Project: &entity.EntityRef{ID: otherProjectID}}}
+		h := NewAIChatHandler(&fakeAIChatAgentClient{}, fake)
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /conversations/{id}", h.GetConversation)
+		req := authedRequest(http.MethodGet, "/conversations/11111111-1111-1111-1111-111111111111", "")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("GetConversationMessages: member can view", func(t *testing.T) {
+		fake := &fakeEntityConversationClient{conv: entity.ConversationDetails{Project: &entity.EntityRef{ID: testProjectID}}}
+		h := NewAIChatHandler(&fakeAIChatAgentClient{}, fake)
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /conversations/{id}/messages", h.GetConversationMessages)
+		req := authedRequest(http.MethodGet, "/conversations/11111111-1111-1111-1111-111111111111/messages", "")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("GetConversationMessages: non-member gets 404", func(t *testing.T) {
+		otherProjectID := "88888888-8888-8888-8888-888888888888"
+		fake := &fakeEntityConversationClient{conv: entity.ConversationDetails{Project: &entity.EntityRef{ID: otherProjectID}}}
+		h := NewAIChatHandler(&fakeAIChatAgentClient{}, fake)
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /conversations/{id}/messages", h.GetConversationMessages)
+		req := authedRequest(http.MethodGet, "/conversations/11111111-1111-1111-1111-111111111111/messages", "")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
 		}
 	})
 }

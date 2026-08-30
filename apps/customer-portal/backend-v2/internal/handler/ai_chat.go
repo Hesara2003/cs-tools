@@ -65,11 +65,12 @@ func NewAIChatHandler(ai aiChatAgentClient, entityClient entityConversationClien
 	return &AIChatHandler{ai: ai, entity: entityClient}
 }
 
-// SetCallerScope enables caller-scoped access: SearchConversations requires
-// the caller to be an active portal-user contact of the project in the URL
-// path. Always enforced in production (main.go calls this unconditionally,
-// no kill switch) — see ProjectHandler.SetCallerScope for why this is a
-// setter rather than a constructor parameter.
+// SetCallerScope enables caller-scoped access: conversation operations require
+// the caller to be an active portal-user contact of the project in the URL path
+// or the project the conversation belongs to. Always enforced in production
+// (main.go calls this unconditionally, no kill switch) — see
+// ProjectHandler.SetCallerScope for why this is a setter rather than a
+// constructor parameter.
 func (h *AIChatHandler) SetCallerScope(resolver *CallerScopeResolver) {
 	h.callerScope = resolver
 }
@@ -187,6 +188,16 @@ func (h *AIChatHandler) GetConversationMessages(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	conv, err := h.entity.GetConversation(r.Context(), conversationID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetConversation failed", "userID", user.UserID, "conversationID", conversationID, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve conversation messages.")
+		return
+	}
+	if conv.Project != nil && !requireProjectMember(w, r, h.callerScope, conv.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+		return
+	}
+
 	limit, offset, ok := parseLimitOffset(w, r)
 	if !ok {
 		return
@@ -232,6 +243,10 @@ func (h *AIChatHandler) CreateConversation(w http.ResponseWriter, r *http.Reques
 	projectID := r.PathValue("id")
 	if !uuidRe.MatchString(projectID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
 		return
 	}
 
@@ -337,6 +352,10 @@ func (h *AIChatHandler) SendConversationMessage(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+		return
+	}
+
 	body, ok := readJSONBody(w, r)
 	if !ok {
 		return
@@ -419,6 +438,10 @@ func (h *AIChatHandler) GetConversation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if result.Project != nil && !requireProjectMember(w, r, h.callerScope, result.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+		return
+	}
+
 	writeJSONValue(w, http.StatusOK, dto.MapConversationDetails(result))
 }
 
@@ -439,6 +462,16 @@ func (h *AIChatHandler) UpdateConversation(w http.ResponseWriter, r *http.Reques
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
+		return
+	}
+
+	conv, err := h.entity.GetConversation(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetConversation failed", "userID", user.UserID, "conversationID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to update conversation.")
+		return
+	}
+	if conv.Project != nil && !requireProjectMember(w, r, h.callerScope, conv.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
 		return
 	}
 
@@ -475,6 +508,10 @@ func (h *AIChatHandler) GetConversationSummary(w http.ResponseWriter, r *http.Re
 	conversationID := r.PathValue("conversationId")
 	if !uuidRe.MatchString(projectID) || !uuidRe.MatchString(conversationID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
 		return
 	}
 
