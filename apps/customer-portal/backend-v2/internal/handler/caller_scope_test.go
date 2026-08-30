@@ -26,6 +26,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/aichatagent"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
+	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/registry"
 )
 
 const callerScopeTestProjectID = "22222222-2222-2222-2222-222222222222"
@@ -819,6 +820,152 @@ func TestAIChatHandler_CallerScope(t *testing.T) {
 
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+}
+
+type fakeEntityUserProjectClient struct {
+	entityUserProjectClient
+	roles []string
+}
+
+func (f *fakeEntityUserProjectClient) GetMe(_ context.Context) (entity.GetUserMeResponse, error) {
+	return entity.GetUserMeResponse{Roles: f.roles}, nil
+}
+
+func (f *fakeEntityUserProjectClient) GetProject(_ context.Context, id string) (entity.ProjectDetailsView, error) {
+	return entity.ProjectDetailsView{ID: id, Account: entity.ProjectAccountRef{ID: "acc-1", Name: "Account 1"}, SfID: "sf-1", Key: "PRJ"}, nil
+}
+
+type fakeRegistryClient struct {
+	registryClient
+	token registry.Token
+}
+
+func (f *fakeRegistryClient) CreateToken(_ context.Context, _ registry.TokenCreatePayload) (registry.TokenCreationResponse, error) {
+	return registry.TokenCreationResponse{Secret: "secret"}, nil
+}
+
+func (f *fakeRegistryClient) SearchTokens(_ context.Context, _ registry.TokenSearchPayload) ([]registry.Token, error) {
+	return []registry.Token{{Name: "tok-1"}}, nil
+}
+
+func (f *fakeRegistryClient) GetTokenByID(_ context.Context, _ string) (registry.Token, error) {
+	return f.token, nil
+}
+
+func (f *fakeRegistryClient) DeleteToken(_ context.Context, _ string) error {
+	return nil
+}
+
+func (f *fakeRegistryClient) RegenerateToken(_ context.Context, _ string) (registry.TokenCreationResponse, error) {
+	return registry.TokenCreationResponse{Secret: "secret-new"}, nil
+}
+
+func (f *fakeRegistryClient) GetIntegrationUsersByProjectID(_ context.Context, _ string) ([]registry.IntegrationUser, error) {
+	return []registry.IntegrationUser{{ID: "u-1", Email: "int@example.com"}}, nil
+}
+
+func TestRegistryHandler_CallerScope(t *testing.T) {
+	contactsFake := &fakeEntityContacts{
+		byProjectID: map[string][]entity.ProjectContact{
+			testProjectID: {{Email: callerScopeTestEmail, GrantsCaseAccess: true}},
+		},
+	}
+	resolver := NewCallerScopeResolver(contactsFake)
+
+	t.Run("CreateRegistryToken: member can create", func(t *testing.T) {
+		h := NewRegistryHandler(&fakeEntityUserProjectClient{}, &fakeRegistryClient{}, "admin")
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /projects/{id}/registry-tokens", h.CreateRegistryToken)
+		req := authedRequest(http.MethodPost, "/projects/"+testProjectID+"/registry-tokens", `{"robotName":"my-robot","tokenType":"User"}`)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("CreateRegistryToken: non-member is forbidden", func(t *testing.T) {
+		otherProjectID := "88888888-8888-8888-8888-888888888888"
+		h := NewRegistryHandler(&fakeEntityUserProjectClient{}, &fakeRegistryClient{}, "admin")
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /projects/{id}/registry-tokens", h.CreateRegistryToken)
+		req := authedRequest(http.MethodPost, "/projects/"+otherProjectID+"/registry-tokens", `{"robotName":"my-robot","tokenType":"User"}`)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("GetProjectIntegrationUsers: member can view", func(t *testing.T) {
+		h := NewRegistryHandler(&fakeEntityUserProjectClient{}, &fakeRegistryClient{}, "admin")
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /projects/{id}/integration-users", h.GetProjectIntegrationUsers)
+		req := authedRequest(http.MethodGet, "/projects/"+testProjectID+"/integration-users", "")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("GetProjectIntegrationUsers: non-member is forbidden", func(t *testing.T) {
+		otherProjectID := "88888888-8888-8888-8888-888888888888"
+		h := NewRegistryHandler(&fakeEntityUserProjectClient{}, &fakeRegistryClient{}, "admin")
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /projects/{id}/integration-users", h.GetProjectIntegrationUsers)
+		req := authedRequest(http.MethodGet, "/projects/"+otherProjectID+"/integration-users", "")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("DeleteRegistryToken: member can delete", func(t *testing.T) {
+		desc := "acc-1##" + testProjectID + "##User##" + callerScopeTestEmail + "##" + callerScopeTestEmail
+		h := NewRegistryHandler(&fakeEntityUserProjectClient{}, &fakeRegistryClient{token: registry.Token{Name: "tok-1", Description: desc}}, "admin")
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("DELETE /registry-tokens/{id}", h.DeleteRegistryToken)
+		req := authedRequest(http.MethodDelete, "/registry-tokens/tok-1", "")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("DeleteRegistryToken: non-member is forbidden", func(t *testing.T) {
+		otherProjectID := "88888888-8888-8888-8888-888888888888"
+		desc := "acc-1##" + otherProjectID + "##User##" + callerScopeTestEmail + "##" + callerScopeTestEmail
+		h := NewRegistryHandler(&fakeEntityUserProjectClient{}, &fakeRegistryClient{token: registry.Token{Name: "tok-1", Description: desc}}, "admin")
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("DELETE /registry-tokens/{id}", h.DeleteRegistryToken)
+		req := authedRequest(http.MethodDelete, "/registry-tokens/tok-1", "")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
 		}
 	})
 }

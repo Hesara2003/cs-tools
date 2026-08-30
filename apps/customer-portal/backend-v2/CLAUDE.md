@@ -369,6 +369,7 @@ Endpoints covered, grouped by how they resolve to a project id:
 - **Direct — `{id}`/`{projectId}` in the URL path is already the project's platform UUID**:
   `ProjectHandler.SearchProjects` (post-filters the response instead of gating the request — see
   below), `CaseHandler.SearchCases`, `RegistryHandler.SearchRegistryTokens`,
+  `RegistryHandler.CreateRegistryToken`, `RegistryHandler.GetProjectIntegrationUsers`,
   `ChangeRequestHandler.SearchChangeRequests`, `TimeCardHandler.SearchTimeCards`,
   `DeploymentHandler.SearchDeployments`, all 10 `ProjectStatsHandler` endpoints
   (`SearchProjectCaseTimeCards`, `GetProjectFilters`, `GetProjectFeatures`,
@@ -377,11 +378,12 @@ Endpoints covered, grouped by how they resolve to a project id:
   `GetProjectUsageStats`), `AIChatHandler`'s direct-project endpoints (`SearchConversations`,
   `CreateConversation`, `SendConversationMessage`, `GetConversationSummary`), and `InstanceHandler`'s
   project-scoped fan-out variants (`SearchProjectInstances`/`*Metrics`/`*Usage`/`*MetricsStats`/`*UsageStats` — see below).
-- **Resolved via a case or conversation** — the path carries a case/conversation id, so the handler
-  fetches the resource first and checks `ProjectDetails.ID` / `Project.ID`: `CaseHandler.GetCase`,
+- **Resolved via a case, conversation, or token** — the path carries a case/conversation/token id, so the handler
+  fetches/derives the resource first and checks `ProjectDetails.ID` / `Project.ID` / `SnProjectID`: `CaseHandler.GetCase`,
   `CaseHandler.SearchCaseActivities`, `CaseHandler.SearchCaseEscalations`,
   `CallRequestHandler.SearchCallRequests`, `AIChatHandler.GetConversation`,
-  `AIChatHandler.UpdateConversation`, `AIChatHandler.GetConversationMessages`.
+  `AIChatHandler.UpdateConversation`, `AIChatHandler.GetConversationMessages`,
+  `RegistryHandler.DeleteRegistryToken`, `RegistryHandler.RegenerateRegistryToken`.
 
 `SearchProjects` is the one exception to "gate the request": it scans entity-service project search
 results in 50-item batches (up to 10 pages / 500 projects ceiling), checks `IsProjectMember` for each

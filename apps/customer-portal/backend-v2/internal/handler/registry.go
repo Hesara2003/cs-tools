@@ -69,12 +69,12 @@ func NewRegistryHandler(entityClient entityUserProjectClient, registryClient reg
 	return &RegistryHandler{entity: entityClient, registry: registryClient, adminRole: adminRole}
 }
 
-// SetCallerScope enables caller-scoped access: SearchRegistryTokens requires
-// the caller to be an active portal-user contact of the project in the URL
-// path, checked before adminRole's own admin/non-admin distinction even
-// applies. Always enforced in production (main.go calls this
-// unconditionally, no kill switch) — see ProjectHandler.SetCallerScope for
-// why this is a setter rather than a constructor parameter.
+// SetCallerScope enables caller-scoped access: registry token and integration
+// user operations require the caller to be an active portal-user contact of
+// the project in the URL path or the token's owning project. Always enforced in
+// production (main.go calls this unconditionally, no kill switch) — see
+// ProjectHandler.SetCallerScope for why this is a setter rather than a
+// constructor parameter.
 func (h *RegistryHandler) SetCallerScope(resolver *CallerScopeResolver) {
 	h.callerScope = resolver
 }
@@ -121,6 +121,10 @@ func (h *RegistryHandler) CreateRegistryToken(w http.ResponseWriter, r *http.Req
 	projectID := r.PathValue("id")
 	if projectID == "" || !uuidRe.MatchString(projectID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
 		return
 	}
 
@@ -265,6 +269,10 @@ func (h *RegistryHandler) authorizeTokenAction(w http.ResponseWriter, r *http.Re
 		return false
 	}
 
+	if !requireProjectMember(w, r, h.callerScope, info.SnProjectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+		return false
+	}
+
 	userDetails, err := h.entity.GetMe(r.Context())
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetMe failed", "userID", user.UserID, "err", summarizeErr(err))
@@ -357,6 +365,10 @@ func (h *RegistryHandler) GetProjectIntegrationUsers(w http.ResponseWriter, r *h
 	projectID := r.PathValue("id")
 	if projectID == "" || !uuidRe.MatchString(projectID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
 		return
 	}
 
