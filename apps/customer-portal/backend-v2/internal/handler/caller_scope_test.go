@@ -825,7 +825,6 @@ func TestAIChatHandler_CallerScope(t *testing.T) {
 }
 
 type fakeEntityUserProjectClient struct {
-	entityUserProjectClient
 	roles []string
 }
 
@@ -838,7 +837,6 @@ func (f *fakeEntityUserProjectClient) GetProject(_ context.Context, id string) (
 }
 
 type fakeRegistryClient struct {
-	registryClient
 	token registry.Token
 }
 
