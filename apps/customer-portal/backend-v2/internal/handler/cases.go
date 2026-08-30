@@ -84,12 +84,9 @@ func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Commented out pending end-to-end verification against real
-	// entity-service data — uncomment while testing, re-comment before
-	// committing. See handler.CallerScopeResolver / requireProjectMember.
-	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
-	// 	return
-	// }
+	if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+		return
+	}
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -201,14 +198,9 @@ func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Commented out pending end-to-end verification against real
-	// entity-service data — uncomment while testing, re-comment before
-	// committing. See handler.CallerScopeResolver / requireProjectMember.
-	// 404, not 403: don't confirm to a non-member caller that a case with
-	// this id exists at all.
-	// if !requireProjectMember(w, r, h.callerScope, result.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
-	// 	return
-	// }
+	if !requireProjectMember(w, r, h.callerScope, result.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+		return
+	}
 
 	writeJSONValue(w, http.StatusOK, dto.MapCaseDetails(result))
 }
@@ -360,18 +352,15 @@ func (h *CaseHandler) SearchCaseActivities(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Commented out pending end-to-end verification against real
-	// entity-service data — uncomment while testing, re-comment before
-	// committing. See handler.CallerScopeResolver / requireProjectMember.
-	// caseView, err := h.entity.GetCase(r.Context(), id)
-	// if err != nil {
-	// 	slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
-	// 	mapUpstreamError(w, err, "Failed to retrieve case.")
-	// 	return
-	// }
-	// if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
-	// 	return
-	// }
+	caseView, err := h.entity.GetCase(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve case.")
+		return
+	}
+	if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+		return
+	}
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -551,18 +540,15 @@ func (h *CaseHandler) SearchCaseEscalations(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Commented out pending end-to-end verification against real
-	// entity-service data — uncomment while testing, re-comment before
-	// committing. See handler.CallerScopeResolver / requireProjectMember.
-	// caseView, err := h.entity.GetCase(r.Context(), caseID)
-	// if err != nil {
-	// 	slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
-	// 	mapUpstreamError(w, err, "Failed to retrieve case.")
-	// 	return
-	// }
-	// if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
-	// 	return
-	// }
+	caseView, err := h.entity.GetCase(r.Context(), caseID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve case.")
+		return
+	}
+	if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+		return
+	}
 
 	body, ok := readJSONBody(w, r)
 	if !ok {

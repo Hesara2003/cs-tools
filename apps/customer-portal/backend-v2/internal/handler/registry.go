@@ -210,12 +210,9 @@ func (h *RegistryHandler) SearchRegistryTokens(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Commented out pending end-to-end verification against real
-	// entity-service data — uncomment while testing, re-comment before
-	// committing. See handler.CallerScopeResolver / requireProjectMember.
-	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
-	// 	return
-	// }
+	if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+		return
+	}
 
 	userDetails, err := h.entity.GetMe(r.Context())
 	if err != nil {

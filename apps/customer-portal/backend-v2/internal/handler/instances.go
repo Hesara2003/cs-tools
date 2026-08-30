@@ -71,13 +71,6 @@ func (h *InstanceHandler) SetCallerScope(resolver *CallerScopeResolver) {
 // project-scoped filter (scope.projectIDs set — the other two ID slices are
 // always nil by construction, see instanceIDFilters); a no-op for the
 // deployment- and deployed-product-scoped variants.
-//
-// All 5 call sites below are deliberately commented out pending end-to-end
-// verification against real entity-service data (see the
-// requireProjectMember doc comment) — restore them rather than removing
-// this helper once that's done.
-//
-//nolint:unused // see comment above
 func (h *InstanceHandler) checkProjectScope(w http.ResponseWriter, r *http.Request, scope instanceIDFilters, userID, email string) bool {
 	if len(scope.projectIDs) == 0 {
 		return true
@@ -114,12 +107,9 @@ func (h *InstanceHandler) searchInstances(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
-	// Commented out pending end-to-end verification against real
-	// entity-service data — uncomment while testing, re-comment before
-	// committing. See handler.CallerScopeResolver / checkProjectScope.
-	// if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
-	// 	return
-	// }
+	if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
+		return
+	}
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -187,12 +177,9 @@ func (h *InstanceHandler) searchInstanceMetrics(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
-	// Commented out pending end-to-end verification against real
-	// entity-service data — uncomment while testing, re-comment before
-	// committing. See handler.CallerScopeResolver / checkProjectScope.
-	// if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
-	// 	return
-	// }
+	if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
+		return
+	}
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -253,12 +240,9 @@ func (h *InstanceHandler) searchInstanceUsage(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
-	// Commented out pending end-to-end verification against real
-	// entity-service data — uncomment while testing, re-comment before
-	// committing. See handler.CallerScopeResolver / checkProjectScope.
-	// if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
-	// 	return
-	// }
+	if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
+		return
+	}
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -324,12 +308,9 @@ func (h *InstanceHandler) searchInstanceMetricsStats(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
-	// Commented out pending end-to-end verification against real
-	// entity-service data — uncomment while testing, re-comment before
-	// committing. See handler.CallerScopeResolver / checkProjectScope.
-	// if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
-	// 	return
-	// }
+	if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
+		return
+	}
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -390,12 +371,9 @@ func (h *InstanceHandler) searchInstanceUsageStats(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
-	// Commented out pending end-to-end verification against real
-	// entity-service data — uncomment while testing, re-comment before
-	// committing. See handler.CallerScopeResolver / checkProjectScope.
-	// if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
-	// 	return
-	// }
+	if !h.checkProjectScope(w, r, scope, user.UserID, user.Email) {
+		return
+	}
 
 	body, ok := readJSONBody(w, r)
 	if !ok {

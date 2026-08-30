@@ -379,12 +379,10 @@ Endpoints covered, grouped by how they resolve to a project id:
   to its own narrower `entityCallRequestClient` interface — the shared `entityClient` already
   satisfies it).
 
-`SearchProjects` is the one exception to "gate the request": it post-filters the entity-service
-response to only projects the caller is a member of (one `IsProjectMember` call per returned project
-— there's no way to push this down into the search request itself, since `SearchProjectsRequest` has
-no caller-identity filter). `Total` is adjusted to the filtered count; `Limit`/`Offset`/`HasMore`
-still describe the *unfiltered* upstream page, a known limitation of post-filtering a single page
-rather than re-paginating the scoped set.
+`SearchProjects` is the one exception to "gate the request": it scans entity-service project search
+results in 50-item batches (up to 10 pages / 500 projects ceiling), checks `IsProjectMember` for each
+project, collects all accessible projects, and applies client-side slice pagination (`Offset` and
+`Limit`). `Total` (`totalRecords`) and `HasMore` accurately describe the caller's scoped matching set.
 
 `GetCase`/`SearchCaseActivities`/`SearchCaseEscalations`/`SearchCallRequests` all 404 (not 403) on a
 non-member — don't confirm to a caller that a case id exists at all if they can't see it. Every

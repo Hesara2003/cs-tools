@@ -117,18 +117,15 @@ func (h *CallRequestHandler) SearchCallRequests(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Commented out pending end-to-end verification against real
-	// entity-service data — uncomment while testing, re-comment before
-	// committing. See handler.CallerScopeResolver / requireProjectMember.
-	// caseView, err := h.entity.GetCase(r.Context(), caseID)
-	// if err != nil {
-	// 	slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
-	// 	mapUpstreamError(w, err, "Failed to retrieve case.")
-	// 	return
-	// }
-	// if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
-	// 	return
-	// }
+	caseView, err := h.entity.GetCase(r.Context(), caseID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve case.")
+		return
+	}
+	if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+		return
+	}
 
 	body, ok := readJSONBody(w, r)
 	if !ok {

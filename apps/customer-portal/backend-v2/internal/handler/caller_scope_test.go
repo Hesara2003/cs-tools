@@ -56,14 +56,24 @@ func (f *fakeEntityContacts) SearchProjectContacts(_ context.Context, projectID 
 type fakeEntityProjectResolver struct {
 	searchResult entity.SearchProjectsResponse
 	searchErr    error
+	pages        map[int]entity.SearchProjectsResponse
 }
 
 func (f *fakeEntityProjectResolver) GetProject(_ context.Context, id string) (entity.ProjectDetailsView, error) {
 	return entity.ProjectDetailsView{ID: id}, nil
 }
 
-func (f *fakeEntityProjectResolver) SearchProjects(_ context.Context, _ entity.SearchProjectsRequest) (entity.SearchProjectsResponse, error) {
-	return f.searchResult, f.searchErr
+func (f *fakeEntityProjectResolver) SearchProjects(_ context.Context, req entity.SearchProjectsRequest) (entity.SearchProjectsResponse, error) {
+	if f.searchErr != nil {
+		return entity.SearchProjectsResponse{}, f.searchErr
+	}
+	if f.pages != nil {
+		if res, ok := f.pages[req.Pagination.Offset]; ok {
+			return res, nil
+		}
+		return entity.SearchProjectsResponse{}, nil
+	}
+	return f.searchResult, nil
 }
 
 func TestCallerScopeResolver_IsProjectMember(t *testing.T) {
@@ -133,41 +143,126 @@ func TestCallerScopeResolver_IsProjectMember(t *testing.T) {
 }
 
 func TestProjectHandler_SearchProjects_CallerScope(t *testing.T) {
-	t.Skip("scopeToCallerProjects call site commented out in SearchProjects pending end-to-end verification — see projects.go")
-	memberProject := entity.ProjectView{ID: "member-project"}
-	otherProject := entity.ProjectView{ID: "other-project"}
-	errorProject := entity.ProjectView{ID: "error-project"}
+	t.Run("filters single-page upstream and excludes non-member and error projects", func(t *testing.T) {
+		memberProject := entity.ProjectView{ID: "member-project"}
+		otherProject := entity.ProjectView{ID: "other-project"}
+		errorProject := entity.ProjectView{ID: "error-project"}
 
-	entityFake := &fakeEntityProjectResolver{
-		searchResult: entity.SearchProjectsResponse{
-			Projects: []entity.ProjectView{memberProject, otherProject, errorProject},
-			Total:    3,
-		},
-	}
-	contactsFake := &fakeEntityContacts{
-		byProjectID: map[string][]entity.ProjectContact{
-			"member-project": {{Email: callerScopeTestEmail, GrantsCaseAccess: true}},
-			"other-project":  {{Email: "someone-else@example.com", GrantsCaseAccess: true}},
-		},
-		errByProjectID: map[string]error{
-			"error-project": errors.New("upstream hiccup"),
-		},
-	}
-	resolver := NewCallerScopeResolver(contactsFake)
+		entityFake := &fakeEntityProjectResolver{
+			searchResult: entity.SearchProjectsResponse{
+				Projects: []entity.ProjectView{memberProject, otherProject, errorProject},
+				Total:    3,
+			},
+		}
+		contactsFake := &fakeEntityContacts{
+			byProjectID: map[string][]entity.ProjectContact{
+				"member-project": {{Email: callerScopeTestEmail, GrantsCaseAccess: true}},
+				"other-project":  {{Email: "someone-else@example.com", GrantsCaseAccess: true}},
+			},
+			errByProjectID: map[string]error{
+				"error-project": errors.New("upstream hiccup"),
+			},
+		}
+		resolver := NewCallerScopeResolver(contactsFake)
 
-	h := NewProjectHandler(entityFake)
-	h.SetCallerScope(resolver)
+		h := NewProjectHandler(entityFake)
+		h.SetCallerScope(resolver)
 
-	req := authedRequest(http.MethodPost, "/projects/search", `{"pagination":{"limit":10,"offset":0}}`)
-	rec := httptest.NewRecorder()
-	h.SearchProjects(rec, req)
+		req := authedRequest(http.MethodPost, "/projects/search", `{"pagination":{"limit":10,"offset":0}}`)
+		rec := httptest.NewRecorder()
+		h.SearchProjects(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Body.String(); !strings.Contains(got, "member-project") || strings.Contains(got, "other-project") || strings.Contains(got, "error-project") {
-		t.Fatalf("expected only member-project in response, got %s", got)
-	}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if got := rec.Body.String(); !strings.Contains(got, "member-project") || strings.Contains(got, "other-project") || strings.Contains(got, "error-project") {
+			t.Fatalf("expected only member-project in response, got %s", got)
+		}
+	})
+
+	t.Run("scans across multiple 50-item upstream pages to find member projects on later pages", func(t *testing.T) {
+		// Page 0 has 50 projects where the user is NOT a member.
+		page0Projects := make([]entity.ProjectView, 50)
+		for i := 0; i < 50; i++ {
+			page0Projects[i] = entity.ProjectView{ID: "other-project-p0"}
+		}
+		// Page 1 has 1 project where user IS a member.
+		page1Projects := []entity.ProjectView{{ID: "member-project-p1"}}
+
+		entityFake := &fakeEntityProjectResolver{
+			pages: map[int]entity.SearchProjectsResponse{
+				0:  {Projects: page0Projects, Total: 51, Limit: 50, Offset: 0, HasMore: true},
+				50: {Projects: page1Projects, Total: 51, Limit: 50, Offset: 50, HasMore: false},
+			},
+		}
+		contactsFake := &fakeEntityContacts{
+			byProjectID: map[string][]entity.ProjectContact{
+				"member-project-p1": {{Email: callerScopeTestEmail, GrantsCaseAccess: true}},
+			},
+		}
+		resolver := NewCallerScopeResolver(contactsFake)
+
+		h := NewProjectHandler(entityFake)
+		h.SetCallerScope(resolver)
+
+		req := authedRequest(http.MethodPost, "/projects/search", `{"pagination":{"limit":10,"offset":0}}`)
+		rec := httptest.NewRecorder()
+		h.SearchProjects(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if got := rec.Body.String(); !strings.Contains(got, "member-project-p1") {
+			t.Fatalf("expected member-project-p1 in response, got %s", got)
+		}
+	})
+
+	t.Run("correctly slices caller pagination and sets total/hasMore", func(t *testing.T) {
+		p1 := entity.ProjectView{ID: "p1"}
+		p2 := entity.ProjectView{ID: "p2"}
+		p3 := entity.ProjectView{ID: "p3"}
+
+		entityFake := &fakeEntityProjectResolver{
+			searchResult: entity.SearchProjectsResponse{
+				Projects: []entity.ProjectView{p1, p2, p3},
+				Total:    3,
+			},
+		}
+		contactsFake := &fakeEntityContacts{
+			byProjectID: map[string][]entity.ProjectContact{
+				"p1": {{Email: callerScopeTestEmail, GrantsCaseAccess: true}},
+				"p2": {{Email: callerScopeTestEmail, GrantsCaseAccess: true}},
+				"p3": {{Email: callerScopeTestEmail, GrantsCaseAccess: true}},
+			},
+		}
+		resolver := NewCallerScopeResolver(contactsFake)
+		h := NewProjectHandler(entityFake)
+		h.SetCallerScope(resolver)
+
+		// Page 1: limit 2, offset 0 -> returns p1, p2, totalRecords: 3, hasMore: true
+		req := authedRequest(http.MethodPost, "/projects/search", `{"pagination":{"limit":2,"offset":0}}`)
+		rec := httptest.NewRecorder()
+		h.SearchProjects(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, `"totalRecords":3`) || !strings.Contains(body, `"hasMore":true`) || !strings.Contains(body, "p1") || !strings.Contains(body, "p2") || strings.Contains(body, "p3") {
+			t.Fatalf("unexpected page 1 response: %s", body)
+		}
+
+		// Page 2: limit 2, offset 2 -> returns p3, totalRecords: 3, hasMore: false
+		req2 := authedRequest(http.MethodPost, "/projects/search", `{"pagination":{"limit":2,"offset":2}}`)
+		rec2 := httptest.NewRecorder()
+		h.SearchProjects(rec2, req2)
+		if rec2.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+		}
+		body2 := rec2.Body.String()
+		if !strings.Contains(body2, `"totalRecords":3`) || !strings.Contains(body2, `"hasMore":false`) || !strings.Contains(body2, "p3") || strings.Contains(body2, "p1") {
+			t.Fatalf("unexpected page 2 response: %s", body2)
+		}
+	})
 }
 
 // TestProjectHandler_SearchProjects_NoResolverConfigured guards a
@@ -221,7 +316,6 @@ func TestCaseHandler_SearchCases_CallerScope(t *testing.T) {
 	})
 
 	t.Run("non-member is forbidden", func(t *testing.T) {
-		t.Skip("requireProjectMember call site commented out in SearchCases pending end-to-end verification — see cases.go")
 		fake := &fakeEntityCaseClient{}
 		h := NewCaseHandler(fake)
 		h.SetCallerScope(resolver)
@@ -264,7 +358,6 @@ func TestCaseHandler_GetCase_CallerScope(t *testing.T) {
 	})
 
 	t.Run("non-member gets 404, not 403", func(t *testing.T) {
-		t.Skip("requireProjectMember call site commented out in GetCase pending end-to-end verification — see cases.go")
 		otherProjectID := "55555555-5555-5555-5555-555555555555"
 		fake := &fakeEntityCaseClientForCase{caseView: entity.CaseView{ID: "case-2", ProjectDetails: entity.EntityRef{ID: otherProjectID}}}
 		h := NewCaseHandler(fake)
@@ -327,7 +420,6 @@ func TestChangeRequestHandler_SearchChangeRequests_CallerScope(t *testing.T) {
 	})
 
 	t.Run("non-member is forbidden", func(t *testing.T) {
-		t.Skip("requireProjectMember call site commented out in SearchChangeRequests pending end-to-end verification — see change_requests.go")
 		h := NewChangeRequestHandler(&fakeEntityChangeRequestClient{})
 		h.SetCallerScope(resolver)
 
@@ -384,7 +476,6 @@ func TestCallRequestHandler_SearchCallRequests_CallerScope(t *testing.T) {
 	})
 
 	t.Run("non-member gets 404", func(t *testing.T) {
-		t.Skip("requireProjectMember call site commented out in SearchCallRequests pending end-to-end verification — see call_requests.go")
 		otherProjectID := "77777777-7777-7777-7777-777777777777"
 		fake := &callerScopeFakeCallRequestClient{caseView: entity.CaseView{ProjectDetails: entity.EntityRef{ID: otherProjectID}}}
 		h := NewCallRequestHandler(fake)
@@ -439,7 +530,6 @@ func TestInstanceHandler_CallerScope(t *testing.T) {
 	})
 
 	t.Run("project-scoped: non-member is forbidden", func(t *testing.T) {
-		t.Skip("requireProjectMember call site commented out in checkProjectScope pending end-to-end verification — see instances.go")
 		otherProjectID := "88888888-8888-8888-8888-888888888888"
 		fake := &fakeEntityInstanceClient{}
 		h := NewInstanceHandler(fake)

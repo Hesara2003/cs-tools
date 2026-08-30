@@ -73,12 +73,9 @@ func (h *TimeCardHandler) SearchTimeCards(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Commented out pending end-to-end verification against real
-	// entity-service data — uncomment while testing, re-comment before
-	// committing. See handler.CallerScopeResolver / requireProjectMember.
-	// if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
-	// 	return
-	// }
+	if !requireProjectMember(w, r, h.callerScope, projectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+		return
+	}
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
