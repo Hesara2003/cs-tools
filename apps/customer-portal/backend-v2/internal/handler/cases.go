@@ -123,6 +123,16 @@ func (h *CaseHandler) SearchCaseAttachments(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	caseView, err := h.entity.GetCase(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve case.")
+		return
+	}
+	if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+		return
+	}
+
 	limit, offset, ok := parseLimitOffset(w, r)
 	if !ok {
 		return
@@ -153,6 +163,16 @@ func (h *CaseHandler) CreateCaseAttachment(w http.ResponseWriter, r *http.Reques
 	id := r.PathValue("id")
 	if id == "" || !uuidRe.MatchString(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	caseView, err := h.entity.GetCase(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve case.")
+		return
+	}
+	if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
 		return
 	}
 
@@ -223,6 +243,13 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
+
+	if req.ProjectID != "" && uuidRe.MatchString(req.ProjectID) {
+		if !requireProjectMember(w, r, h.callerScope, req.ProjectID, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+			return
+		}
+	}
+
 	entityReq := dto.BuildEntityCreateCaseRequest(req)
 	// CreatedBy is server-set from the authenticated caller, never from the
 	// request body (the struct's json:"-" tag means a client-supplied value
@@ -263,6 +290,16 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" || !uuidRe.MatchString(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	caseView, err := h.entity.GetCase(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve case.")
+		return
+	}
+	if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
 		return
 	}
 
@@ -310,6 +347,16 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 	id := r.PathValue("id")
 	if id == "" || !uuidRe.MatchString(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	caseView, err := h.entity.GetCase(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve case.")
+		return
+	}
+	if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
 		return
 	}
 
@@ -397,6 +444,16 @@ func (h *CaseHandler) GetCaseFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	caseView, err := h.entity.GetCase(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve case.")
+		return
+	}
+	if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+		return
+	}
+
 	result, err := h.entity.GetCaseFeedback(r.Context(), id)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetCaseFeedback failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
@@ -418,6 +475,16 @@ func (h *CaseHandler) SubmitCaseFeedback(w http.ResponseWriter, r *http.Request)
 	id := r.PathValue("id")
 	if id == "" || !uuidRe.MatchString(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	caseView, err := h.entity.GetCase(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve case.")
+		return
+	}
+	if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
 		return
 	}
 
@@ -443,10 +510,6 @@ func (h *CaseHandler) SubmitCaseFeedback(w http.ResponseWriter, r *http.Request)
 }
 
 // PatchCaseAttachment handles PATCH /cases/{caseId}/attachments/{attachmentId}.
-// referenceId/referenceType are injected server-side (caseId path param,
-// ReferenceTypeCase). Only Name is read from the request body — Description
-// is never wired through here, by design for this route (case attachments
-// don't carry a description).
 func (h *CaseHandler) PatchCaseAttachment(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -458,6 +521,16 @@ func (h *CaseHandler) PatchCaseAttachment(w http.ResponseWriter, r *http.Request
 	attachmentID := r.PathValue("attachmentId")
 	if !uuidRe.MatchString(caseID) || !uuidRe.MatchString(attachmentID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	caseView, err := h.entity.GetCase(r.Context(), caseID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve case.")
+		return
+	}
+	if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
 		return
 	}
 
@@ -495,6 +568,16 @@ func (h *CaseHandler) CreateCaseEscalation(w http.ResponseWriter, r *http.Reques
 	caseID := r.PathValue("caseId")
 	if !uuidRe.MatchString(caseID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	caseView, err := h.entity.GetCase(r.Context(), caseID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetCase failed", "userID", user.UserID, "caseID", caseID, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve case.")
+		return
+	}
+	if !requireProjectMember(w, r, h.callerScope, caseView.ProjectDetails.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
 		return
 	}
 

@@ -199,6 +199,7 @@ func main() {
 	callerScopeResolver := handler.NewCallerScopeResolver(entityClient)
 	projectHandler.SetCallerScope(callerScopeResolver)
 	caseHandler.SetCallerScope(callerScopeResolver)
+	attachmentHandler.SetCallerScope(callerScopeResolver)
 	registryHandler.SetCallerScope(callerScopeResolver)
 	changeRequestHandler.SetCallerScope(callerScopeResolver)
 	timeCardHandler.SetCallerScope(callerScopeResolver)
@@ -207,6 +208,9 @@ func main() {
 	deploymentHandler.SetCallerScope(callerScopeResolver)
 	instanceHandler.SetCallerScope(callerScopeResolver)
 	callRequestHandler.SetCallerScope(callerScopeResolver)
+	contactHandler.SetCallerScope(callerScopeResolver)
+	productConsumptionHandler.SetCallerScope(callerScopeResolver)
+	commentHandler.SetCallerScope(callerScopeResolver)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {

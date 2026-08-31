@@ -33,6 +33,10 @@ func (f *fakeEntityCaseClient) SearchAttachments(ctx context.Context, req entity
 	return entity.SearchAttachmentsResponse{Total: 3}, nil
 }
 
+func (f *fakeEntityCaseClient) GetCase(_ context.Context, id string) (entity.CaseView, error) {
+	return entity.CaseView{ID: id, ProjectDetails: entity.EntityRef{ID: "proj-1"}}, nil
+}
+
 // TestSearchCaseAttachments_RouteAndQueryParams is an end-to-end check,
 // through a real http.ServeMux registered with the exact pattern main.go
 // uses ("GET /cases/{id}/attachments"), that the {id} path value and the

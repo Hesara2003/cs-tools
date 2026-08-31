@@ -155,6 +155,11 @@ func (h *ChangeRequestHandler) GetChangeRequest(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Caller-scope check commented out for now per review; will be re-evaluated:
+	// if result.Project.ID != "" && !requireProjectMember(w, r, h.callerScope, result.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	// 	return
+	// }
+
 	writeJSONValue(w, http.StatusOK, dto.MapChangeRequestDetails(result))
 }
 
@@ -171,6 +176,17 @@ func (h *ChangeRequestHandler) PatchChangeRequest(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Caller-scope check commented out for now per review; will be re-evaluated:
+	// cr, err := h.entity.GetChangeRequest(r.Context(), id)
+	// if err != nil {
+	// 	slog.ErrorContext(r.Context(), "entity GetChangeRequest failed", "userID", user.UserID, "changeRequestID", id, "err", summarizeErr(err))
+	// 	mapUpstreamError(w, err, "Failed to update change request.")
+	// 	return
+	// }
+	// if cr.Project.ID != "" && !requireProjectMember(w, r, h.callerScope, cr.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -211,6 +227,17 @@ func (h *ChangeRequestHandler) GetChangeRequestApprovals(w http.ResponseWriter, 
 		return
 	}
 
+	// Caller-scope check commented out for now per review; will be re-evaluated:
+	// cr, err := h.entity.GetChangeRequest(r.Context(), id)
+	// if err != nil {
+	// 	slog.ErrorContext(r.Context(), "entity GetChangeRequest failed", "userID", user.UserID, "changeRequestID", id, "err", summarizeErr(err))
+	// 	mapUpstreamError(w, err, "Failed to retrieve change request approvals.")
+	// 	return
+	// }
+	// if cr.Project.ID != "" && !requireProjectMember(w, r, h.callerScope, cr.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	// 	return
+	// }
+
 	result, err := h.entity.GetChangeRequestApprovals(r.Context(), id)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetChangeRequestApprovals failed", "userID", user.UserID, "changeRequestID", id, "err", summarizeErr(err))
@@ -234,6 +261,17 @@ func (h *ChangeRequestHandler) DecideChangeRequestApproval(w http.ResponseWriter
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+
+	// Caller-scope check commented out for now per review; will be re-evaluated:
+	// cr, err := h.entity.GetChangeRequest(r.Context(), id)
+	// if err != nil {
+	// 	slog.ErrorContext(r.Context(), "entity GetChangeRequest failed", "userID", user.UserID, "changeRequestID", id, "err", summarizeErr(err))
+	// 	mapUpstreamError(w, err, "Failed to record approval decision.")
+	// 	return
+	// }
+	// if cr.Project.ID != "" && !requireProjectMember(w, r, h.callerScope, cr.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
