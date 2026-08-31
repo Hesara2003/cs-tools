@@ -192,16 +192,16 @@ backend-v2/
 │   │   ├── client.go            # Config/Client/do()/getJSON()/postJSON()/patchJSON()
 │   │   ├── types.go             # entity-service's wire-format structs (internal to this package)
 │   │   ├── users.go             # GetMe, PatchMe
-│   │   ├── accounts.go          # SearchAccounts, GetAccount
+│   │   ├── accounts.go          # GetAccount
 │   │   ├── projects.go          # SearchProjects, GetProject
 │   │   ├── cases.go             # SearchCases, GetCase, CreateCase, UpdateCase, CreateCaseComment, SearchCaseActivities
 │   │   ├── deployments.go       # SearchDeployments, CreateDeployment
 │   │   ├── deployed_products.go # SearchDeployedProducts, CreateDeployedProduct, UpdateDeployedProduct
-│   │   ├── attachments.go       # CreateAttachment, SearchAttachments, GetAttachmentContent, DeleteAttachment
+│   │   ├── attachments.go       # CreateAttachment, GetAttachmentContent, DeleteAttachment
 │   │   ├── products.go          # SearchProducts, SearchProductVersions
 │   │   ├── change_requests.go   # create/search/get/update, approvals get/decide
 │   │   ├── call_requests.go     # CreateCallRequest, SearchCallRequests, UpdateCallRequest
-│   │   ├── comments.go          # CreateComment, SearchComments (generic, any reference entity)
+│   │   ├── comments.go          # CreateComment (generic, any reference entity)
 │   │   ├── conversations.go     # SearchConversations
 │   │   ├── product_vulnerabilities.go # SearchProductVulnerabilities, GetProductVulnerability, GetVulnerabilityMeta
 │   │   ├── catalogs.go          # SearchCatalogs, GetCatalogItemVariables
