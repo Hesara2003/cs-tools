@@ -377,6 +377,91 @@ No `case_service.go`/`sn_case_service.go` method calls any of this yet — case
 creation/update do not register a clock. Wiring that in requires deciding the
 SLA duration policy first (see above), which is out of scope here.
 
+## Scheduled task runs
+
+`scheduled_task_run` (migration `000013`, `internal/domain/entity.go`'s
+`ScheduledTaskRun`, `internal/repository/scheduled_task_run_repo.go`,
+`internal/service/scheduled_task_run_service.go`) is durable claim/retry
+state for `operations/csm-scheduled-tasks` — a single Choreo Scheduled Task
+that internally fans out to any number of independently-scheduled sub-crons
+on one shared driver cadence. Like `sla_clocks`/`event_publish_failures`, it
+has no ServiceNow equivalent and is always backed by Postgres regardless of
+`DATA_SOURCE`. It is also the one intentionally **singular** table name in
+this schema — every other table here is plural; don't "fix" it to match.
+
+`taskName` is a caller-defined registry key, not a fixed enum — same
+reasoning as `sla_clocks.clockType`: which sub-crons exist, and on what
+schedule, is a policy decision made entirely by `operations/csm-scheduled-tasks`'
+own registry, not something this service tracks.
+
+There is no stored status column, the same choice `sla_clocks` makes for the
+same reason: status is always derivable from which timestamp is set, and
+each is independently useful on its own — `succeededOn` (done, forever, for
+this period), `supersededOn` (abandoned: the next period came due before
+this one ever succeeded), or `nextRetryOn` (eligible for another attempt
+once it's in the past). See `operations/csm-scheduled-tasks`'s own
+`CLAUDE.md` for the full design behind "period keys" and "supersede" — this
+service only stores the result of that design, it does not compute period
+keys or decide backoff itself, the same division of labor as `sla_clocks`.
+
+Exposed at:
+
+- `POST /scheduled-tasks/attempts` — the only endpoint with real decision
+  logic. Named as a collection-create (like GitHub's `.../dispatches` or
+  `.../deployments`), not a verb-suffixed action path — POST creates a new
+  "attempt" resource in the `attempts` collection. Atomically claims
+  `taskName`/`periodKey` if it's allowed to run right now: a period this
+  task hasn't seen before first supersedes any other still-open row for the
+  same `taskName` (there is at most one by construction), then inserts and
+  claims fresh; an existing row whose `nextRetryOn` has arrived (or that
+  looks like an orphaned claim — see `staleClaimAfterSeconds`) is bumped
+  and claimed; anything else (already succeeded, already superseded, not
+  yet due, genuinely still claimed by a live attempt) is denied. Concurrent
+  callers racing for the same `taskName` — whether the exact same
+  `periodKey` or two different ones — are serialized by a
+  transaction-scoped Postgres advisory lock keyed on `taskName`
+  (`pg_advisory_xact_lock(hashtext(taskName))`), not just the table's own
+  `UNIQUE(task_name, period_key)` constraint: that constraint alone only
+  stops two claims from colliding on the *same* period, not two concurrent
+  claims for two different *new* periods of the same task, which would
+  otherwise both find no existing row and both insert successfully —
+  leaving two open rows for one task at once. The lock closes that window;
+  at most one caller can ever see `allowed: true` for a given `taskName` at
+  a time, regardless of which period it's for.
+- `PATCH /scheduled-tasks/attempts/{id}` — reports an attempt's outcome,
+  `{attemptCount, status: "succeeded"|"failed", error?, nextRetryOn?}` (the
+  latter two required only when `status` is `"failed"`). One endpoint, not
+  two separate action-style ones (an earlier version had `POST .../complete`
+  and `POST .../fail`) — PATCH is the correct verb for a partial update to
+  an existing resource's state, and "which outcome" is naturally the
+  request body's job, not the URL's. Rejects the update (404) unless the
+  caller's `attemptCount` still matches the active claim (the value
+  `Attempt` returned) — a worker that stalls past `staleClaimAfterSeconds`
+  and gets reclaimed by a different caller later finds its own stale report
+  rejected instead of silently overwriting whatever the reclaiming caller's
+  own attempt has since done. On `"failed"`, deliberately does not mark the
+  row succeeded or superseded, so it stays eligible for another attempt, or
+  for being superseded once the next period's own `Attempt` call comes in.
+- `GET /scheduled-tasks/attempts?status=<failed|succeeded|superseded>` —
+  monitoring only, not called by the engine's own claim/retry logic. Plain
+  unpaginated list. `status=failed` stays small by construction (at most
+  one open row per `taskName`), and `status=succeeded`/`superseded` now
+  stays bounded too, as long as `operations/csm-scheduled-tasks`' own
+  `housekeeping_cleanup` sub-cron (below) keeps running — that result set
+  has no cap of its own, it's only ever kept small by that cleanup actually
+  happening; don't assume it's small in a deployment where it isn't.
+- `DELETE /scheduled-tasks/attempts?resolvedBefore=<RFC3339 timestamp>` — deletes
+  every row that succeeded or was superseded before the cutoff, by its own
+  `succeededOn`/`supersededOn` (not `createdOn` — a row open for 89 days
+  before finally resolving on day 90 gets the same retention window as one
+  resolved on day one, not an immediate deletion because it happens to look
+  old by creation time). A row still `failed` is never deleted regardless
+  of age — it represents a genuinely unresolved problem, not history to
+  archive. Called daily by `operations/csm-scheduled-tasks`' own
+  self-hosted `housekeeping_cleanup` sub-cron (`internal/housekeeping`
+  there) — that endpoint existed from the start, but this is the first
+  thing that actually calls it.
+
 ## Adding a new entity
 
 Follow these steps in order:

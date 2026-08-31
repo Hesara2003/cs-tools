@@ -261,6 +261,178 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /scheduled-tasks/attempts:
+    post:
+      summary: >-
+        Atomically decide whether taskName/periodKey may run right now, and
+        claim it if so. Backs operations/csm-scheduled-tasks' engine — see
+        that component's own CLAUDE.md and this service's CLAUDE.md
+        ("Scheduled task runs") for the full decision table. Has no
+        ServiceNow equivalent — always backed by Postgres.
+      operationId: attemptScheduledTaskRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimScheduledTaskRunRequest'
+      responses:
+        "200":
+          description: The claim decision, and the row's resulting state either way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimScheduledTaskRunResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      summary: >-
+        List scheduled_task_run rows, optionally filtered by derived status.
+        Monitoring only — not used by operations/csm-scheduled-tasks' own
+        engine.
+      operationId: listScheduledTaskRuns
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["failed", "succeeded", "superseded"]
+      responses:
+        "200":
+          description: Matching runs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListScheduledTaskRunsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: >-
+        Delete every run that succeeded or was superseded before
+        resolvedBefore (by its own resolution time, not when it was
+        created). A run that is still open (neither succeeded nor
+        superseded) is never deleted, regardless of age. Called daily by
+        operations/csm-scheduled-tasks' own self-hosted housekeeping_cleanup
+        sub-cron.
+      operationId: deleteScheduledTaskRuns
+      parameters:
+        - name: resolvedBefore
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Deletion complete.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteScheduledTaskRunsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /scheduled-tasks/attempts/{id}:
+    patch:
+      summary: >-
+        Report an attempt's outcome — succeeded or failed, per the request
+        body's status. Replaces what used to be two separate action-style
+        endpoints (POST .../complete and POST .../fail). attemptCount must
+        match the active claim (the value returned by the Attempt call
+        being reported on) — a stale or already-resolved claim is rejected
+        with 404 rather than silently overwriting a newer attempt's
+        outcome. On status "failed", the run is deliberately not marked
+        succeeded or superseded — it stays eligible for another attempt at
+        nextRetryOn, or for being superseded once the next period comes due.
+      operationId: updateScheduledTaskRunAttempt
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateScheduledTaskRunAttemptRequest'
+      responses:
+        "200":
+          description: Outcome recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduledTaskRun'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such run, or the claim is no longer active.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /users/me:
     get:
       summary: Get the profile of the currently authenticated user.
@@ -421,7 +593,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SNAccountDetail'
+                $ref: '#/components/schemas/AccountDetail'
         "400":
           description: Bad request.
           content:
@@ -1459,6 +1631,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /cases/{id}/comments/search:
+    post:
+      summary: Search comments on a support case.
+      operationId: searchCaseComments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchCaseCommentsRequest'
+      responses:
+        "200":
+          description: Paginated list of comments for the case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchCaseCommentsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /cases/{id}/tags:
     post:
       summary: Attach a free-text tag to a support case.
@@ -1827,6 +2042,77 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/{id}/confirm:
+    post:
+      summary: >
+        Confirm a pending CSM-native (Postgres) data source attachment now that its file has
+        finished uploading to SFTPGo.
+      description: >
+        Second half of the two-step upload flow: the caller registers a "pending" row via
+        POST /attachments before minting an SFTPGo upload credential, then calls this once the
+        browser reports the upload succeeded. This closes the gap where a browser upload could
+        succeed in SFTPGo while the metadata-registration call never lands, leaving an
+        untracked orphan file. Only the actor who created the pending row may confirm it.
+        ServiceNow-sourced attachments have no such lifecycle and are rejected with 503.
+      operationId: confirmCaseAttachment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Attachment UUID.
+      responses:
+        "200":
+          description: Attachment confirmed successfully; status transitioned to complete.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmAttachmentResponse'
+        "400":
+          description: Bad request (malformed UUID).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The attachment was not created by the current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Attachment not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Attachment exists but is no longer pending (already confirmed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Not supported for the ServiceNow data source.
           content:
             application/json:
               schema:
@@ -5236,7 +5522,7 @@ components:
           type: string
           description: Filter by account classification (e.g. enterprise).
 
-    SNAccountView:
+    AccountView:
       type: object
       properties:
         id:
@@ -5259,10 +5545,11 @@ components:
         supportTier:
           type: string
           nullable: true
-          description: Support tier label (e.g. Platinum).
+          description: Support tier label (e.g. Platinum). ServiceNow data source only.
         arrToday:
           type: string
           nullable: true
+          description: ServiceNow data source only.
         technicalOwner:
           nullable: true
           allOf:
@@ -5273,10 +5560,12 @@ components:
             - $ref: '#/components/schemas/PersonRef'
         renewalAccountManager:
           nullable: true
+          description: ServiceNow data source only.
           allOf:
             - $ref: '#/components/schemas/PersonRef'
         activationDate:
           type: string
+          nullable: true
         deactivationDate:
           type: string
           nullable: true
@@ -5301,7 +5590,7 @@ components:
         label:
           type: string
 
-    SNAccountDetail:
+    AccountDetail:
       type: object
       properties:
         id:
@@ -5323,11 +5612,13 @@ components:
           nullable: true
         supportTier:
           nullable: true
+          description: ServiceNow data source only.
           allOf:
             - $ref: '#/components/schemas/SNSupportTierRef'
         arrToday:
           type: string
           nullable: true
+          description: ServiceNow data source only.
         technicalOwner:
           nullable: true
           allOf:
@@ -5338,10 +5629,12 @@ components:
             - $ref: '#/components/schemas/PersonRef'
         renewalAccountManager:
           nullable: true
+          description: ServiceNow data source only.
           allOf:
             - $ref: '#/components/schemas/PersonRef'
         activationDate:
           type: string
+          nullable: true
         deactivationDate:
           type: string
           nullable: true
@@ -5363,7 +5656,7 @@ components:
         accounts:
           type: array
           items:
-            $ref: '#/components/schemas/SNAccountView'
+            $ref: '#/components/schemas/AccountView'
         total:
           type: integer
         limit:
@@ -7791,6 +8084,21 @@ components:
             File size in bytes. Required for the CSM-native (Postgres) data source (this
             service cannot compute it there); ignored for ServiceNow, which computes it from
             the decoded file payload.
+        status:
+          $ref: '#/components/schemas/AttachmentStatus'
+
+    AttachmentStatus:
+      type: string
+      enum:
+        - pending
+        - complete
+      description: >
+        Upload lifecycle state for a CSM-native (Postgres) data source attachment. Meaningful
+        for that data source only -- ServiceNow's /attachments API only ever returns
+        fully-uploaded files, so ServiceNow-sourced attachments are always "complete". On
+        create, omitted/empty defaults to "complete" (today's behavior, preserved for every
+        existing caller); pass "pending" to register the row before the file has finished
+        uploading to SFTPGo, then confirm it via POST /attachments/{id}/confirm.
 
     AttachmentDetail:
       type: object
@@ -7807,13 +8115,32 @@ components:
           type: string
         downloadUrl:
           type: string
+          nullable: true
+          description: >
+            Null for a CSM-native (Postgres) data source attachment: this service holds no
+            download location for it, only its storageKey. Always set for ServiceNow-sourced
+            attachments.
         storageKey:
           type: string
           nullable: true
           description: Set only for CSM-native (Postgres) data source attachments. See Attachment.storageKey.
+        status:
+          $ref: '#/components/schemas/AttachmentStatus'
 
     CreateAttachmentResponse:
       type: object
+      properties:
+        message:
+          type: string
+        attachment:
+          $ref: '#/components/schemas/AttachmentDetail'
+
+    ConfirmAttachmentResponse:
+      type: object
+      description: >
+        Response for POST /attachments/{id}/confirm. Same shape as CreateAttachmentResponse --
+        confirming is the second half of the CSM-native (Postgres) data source's two-step
+        (pending -> complete) upload flow.
       properties:
         message:
           type: string
@@ -7859,6 +8186,8 @@ components:
             Reference to the file's location in external object storage (SFTPGo), set only for
             CSM-native (Postgres) data source attachments. Null for ServiceNow-sourced
             attachments, whose bytes are held by ServiceNow itself.
+        status:
+          $ref: '#/components/schemas/AttachmentStatus'
 
     ReferenceType:
       type: string
@@ -11799,11 +12128,17 @@ components:
           nullable: true
         content:
           type: string
-          description: Base64 data URI of the attachment content (e.g. data:image/png;base64,...).
+          nullable: true
+          description: >
+            Base64 data URI of the attachment content (e.g. data:image/png;base64,...). Null
+            for a CSM-native (Postgres) data source attachment: this service holds no bytes for
+            it, only its storageKey. Always set for ServiceNow-sourced attachments.
         storageKey:
           type: string
           nullable: true
           description: Set only for CSM-native (Postgres) data source attachments. See Attachment.storageKey.
+        status:
+          $ref: '#/components/schemas/AttachmentStatus'
 
     UpdateAttachmentRequest:
       type: object
@@ -12773,6 +13108,120 @@ components:
             completed it once. Only rely on this field to gate a reaction
             if that risk is acceptable, or if the reaction's own completion
             is tracked separately and durably instead.
+
+    ScheduledTaskRun:
+      description: >
+        The durable record of one attempted period of a registered sub-cron
+        running inside operations/csm-scheduled-tasks. No stored status
+        field — status is always derivable from which timestamp is set:
+        succeededOn (done, forever, for this period), supersededOn
+        (abandoned — the next period came due first), or nextRetryOn
+        (eligible for another attempt once it's in the past). Has no
+        ServiceNow equivalent — always backed by Postgres.
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        taskName:
+          type: string
+        periodKey:
+          type: string
+          format: date-time
+        attemptCount:
+          type: integer
+        lastError:
+          type: string
+          nullable: true
+        nextRetryOn:
+          type: string
+          format: date-time
+          nullable: true
+        firstAttemptedOn:
+          type: string
+          format: date-time
+        lastAttemptedOn:
+          type: string
+          format: date-time
+        succeededOn:
+          type: string
+          format: date-time
+          nullable: true
+        supersededOn:
+          type: string
+          format: date-time
+          nullable: true
+
+    ClaimScheduledTaskRunRequest:
+      type: object
+      required: [taskName, periodKey]
+      additionalProperties: false
+      properties:
+        taskName:
+          type: string
+        periodKey:
+          type: string
+          format: date-time
+        staleClaimAfterSeconds:
+          type: integer
+          description: >-
+            How long a row that looks currently-claimed is trusted before
+            being treated as an orphaned claim and made eligible for
+            another attempt. Defaults to 3600 (1 hour) when omitted or zero.
+
+    ClaimScheduledTaskRunResponse:
+      type: object
+      properties:
+        allowed:
+          type: boolean
+          description: >-
+            The actual decision the caller must act on. false does not mean
+            error — it means this exact claim was denied (already
+            succeeded, already superseded, not yet due, or claimed by
+            another still-live attempt); inspect run to tell those apart.
+        run:
+          $ref: '#/components/schemas/ScheduledTaskRun'
+
+    UpdateScheduledTaskRunAttemptRequest:
+      type: object
+      required: [attemptCount, status]
+      additionalProperties: false
+      properties:
+        attemptCount:
+          type: integer
+          minimum: 1
+          description: >-
+            Must match ClaimScheduledTaskRunResponse.run.attemptCount from
+            the Attempt call being reported on — binds this report to that
+            specific claim so a stale worker can't overwrite a newer retry.
+        status:
+          type: string
+          enum: ["succeeded", "failed"]
+        error:
+          type: string
+          description: Required when status is "failed"; ignored otherwise.
+        nextRetryOn:
+          type: string
+          format: date-time
+          description: >-
+            Required when status is "failed"; ignored otherwise. Supplied
+            by the caller, not computed here — this service has no opinion
+            on backoff policy, the same way it has no opinion on SLA clock
+            durations.
+
+    ListScheduledTaskRunsResponse:
+      type: object
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScheduledTaskRun'
+
+    DeleteScheduledTaskRunsResponse:
+      type: object
+      properties:
+        deletedCount:
+          type: integer
 
     SearchEventPublishFailuresResponse:
       type: object

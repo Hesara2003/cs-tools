@@ -215,6 +215,17 @@ func (h *CaseHandler) CreateCaseAttachment(w http.ResponseWriter, r *http.Reques
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// ConfirmCaseAttachment handles POST /attachments/{id}/confirm.
+func (h *CaseHandler) ConfirmCaseAttachment(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.svc.ConfirmCaseAttachment(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // SearchCaseAttachments handles POST /attachments/search.
 func (h *CaseHandler) SearchCaseAttachments(w http.ResponseWriter, r *http.Request) {
 	var req domain.SearchAttachmentsRequest

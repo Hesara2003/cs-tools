@@ -627,6 +627,18 @@ func (s *caseService) CreateCaseAttachment(ctx context.Context, req domain.Creat
 	if req.SizeBytes <= 0 {
 		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "sizeBytes must be greater than zero"}
 	}
+	// Empty defaults to complete: every caller before this change (and every
+	// existing Postgres-path caller that doesn't know about the pending
+	// state) gets exactly today's behavior. Only a caller that explicitly
+	// wants the two-step upload flow passes "pending".
+	switch req.Status {
+	case "":
+		req.Status = domain.AttachmentStatusComplete
+	case domain.AttachmentStatusPending, domain.AttachmentStatusComplete:
+		// valid
+	default:
+		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid status %q: must be 'pending' or 'complete'", req.Status)}
+	}
 
 	user, err := s.resolveActor(ctx)
 	if err != nil {
@@ -647,6 +659,7 @@ func (s *caseService) CreateCaseAttachment(ctx context.Context, req domain.Creat
 			CreatedOn:  a.CreatedOn,
 			CreatedBy:  user.Email,
 			StorageKey: a.StorageKey,
+			Status:     a.Status,
 			// No DownloadURL: this service holds no bytes for a Postgres-sourced
 			// attachment, only its storage_key. Resolving storage_key to an
 			// actual download location is the downstream CSM backend's job.
@@ -654,8 +667,73 @@ func (s *caseService) CreateCaseAttachment(ctx context.Context, req domain.Creat
 	}, nil
 }
 
+// ConfirmCaseAttachment implements CaseService for the CSM-native (Postgres)
+// data source. It is the second half of the two-step upload flow: the caller
+// (the CSM backend) registers a 'pending' row via CreateCaseAttachment
+// *before* minting an SFTPGo upload credential, then calls this once the
+// browser reports the upload succeeded, transitioning the row to 'complete'.
+//
+// Ownership: unlike UpdateAttachment/DeleteCaseAttachment (which any
+// authenticated user may perform on any case attachment -- there is no
+// per-resource ACL in this data source beyond authentication, see
+// resolveActor's doc comment), confirming is restricted to the same actor
+// who created the pending row. A pending row represents an upload a specific
+// user initiated; there is no legitimate case yet for a different user to
+// confirm it on their behalf, and allowing it would let any authenticated
+// user "complete" an attachment they never uploaded.
+func (s *caseService) ConfirmCaseAttachment(ctx context.Context, id string) (domain.ConfirmAttachmentResponse, error) {
+	if err := validateUUIDs("id", []string{id}); err != nil {
+		return domain.ConfirmAttachmentResponse{}, err
+	}
+
+	user, err := s.resolveActor(ctx)
+	if err != nil {
+		return domain.ConfirmAttachmentResponse{}, err
+	}
+
+	existing, err := s.repo.GetCaseAttachmentByID(ctx, id)
+	if err != nil {
+		return domain.ConfirmAttachmentResponse{}, err
+	}
+	if existing.CreatedBy == nil || existing.CreatedBy.ID == nil || *existing.CreatedBy.ID != user.ID {
+		return domain.ConfirmAttachmentResponse{}, &apierror.ForbiddenError{Msg: "attachment was not created by the current user"}
+	}
+	if existing.Status != domain.AttachmentStatusPending {
+		return domain.ConfirmAttachmentResponse{}, &apierror.ConflictError{Msg: fmt.Sprintf("attachment is not pending (current status: %q)", existing.Status)}
+	}
+
+	a, err := s.repo.ConfirmCaseAttachment(ctx, id)
+	if err != nil {
+		return domain.ConfirmAttachmentResponse{}, err
+	}
+
+	return domain.ConfirmAttachmentResponse{
+		Message: "Attachment confirmed successfully",
+		Attachment: domain.AttachmentDetail{
+			ID:         a.ID,
+			SizeBytes:  a.SizeBytes,
+			CreatedOn:  a.CreatedOn,
+			CreatedBy:  user.Email,
+			StorageKey: a.StorageKey,
+			Status:     a.Status,
+		},
+	}, nil
+}
+
 // SearchCaseAttachments implements CaseService for the CSM-native (Postgres)
 // data source.
+//
+// Read-path status decision: the underlying repository query filters out
+// 'pending' rows entirely (see caseRepo.SearchCaseAttachments), so a case's
+// attachment list never shows a still-uploading placeholder to other users.
+// This is a deliberate product-behavior choice, not an oversight: a pending
+// row may never complete (the upload could fail, or the tab could just
+// close), and showing it in a shared list before that's known risks other
+// team members seeing and trying to act on a file that doesn't exist yet. A
+// specific-id lookup (GetAttachmentByID) is not filtered this way -- it
+// still returns a pending row -- which is what the confirm step relies on,
+// and is also how an uploader could be shown their own in-flight upload if
+// the FE chooses to poll it directly rather than via this list.
 func (s *caseService) SearchCaseAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) (domain.SearchAttachmentsResponse, error) {
 	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
 		return domain.SearchAttachmentsResponse{}, err
@@ -733,7 +811,7 @@ func (s *caseService) SubmitCaseFeedback(_ context.Context, _ string, _ domain.S
 }
 
 // GetAttachmentByID implements CaseService for the CSM-native (Postgres) data
-// source. Content is always "": this service holds no bytes for a
+// source. Content is always nil: this service holds no bytes for a
 // Postgres-sourced attachment, only its storage_key -- see
 // GetCaseAttachmentContent's doc comment for why content must be resolved
 // externally via StorageKey instead.
@@ -763,8 +841,9 @@ func (s *caseService) GetAttachmentByID(ctx context.Context, id string) (domain.
 		CreatedOn:   a.CreatedOn,
 		DownloadURL: a.DownloadURL,
 		PreviewURL:  a.PreviewURL,
-		Content:     "",
+		Content:     nil,
 		StorageKey:  a.StorageKey,
+		Status:      a.Status,
 	}, nil
 }
 

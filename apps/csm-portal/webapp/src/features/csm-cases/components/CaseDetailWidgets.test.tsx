@@ -43,6 +43,7 @@ import type {
   CaseWatcher,
 } from "@features/csm-cases/types/csmCases";
 import type { ProjectDetails } from "@features/csm-projects/types/csmProjects";
+import type { AttachmentPreviewSource } from "@features/csm-cases/utils/attachmentPreview";
 
 // `previewTarget`/`onPreviewTargetChange` (part of the widget's `preview`
 // prop) are lifted to the parent page (see CsmCaseDetailPage) so the preview
@@ -54,7 +55,9 @@ function AttachmentsWidgetHarness({
   onGetPreviewContent,
   ...props
 }: Omit<ComponentProps<typeof AttachmentsWidget>, "preview"> & {
-  onGetPreviewContent?: (attachment: CaseAttachment) => Promise<Blob>;
+  onGetPreviewContent?: (
+    attachment: CaseAttachment,
+  ) => Promise<AttachmentPreviewSource>;
 }): JSX.Element {
   const [previewTarget, setPreviewTarget] = useState<CaseAttachment | null>(
     null,
@@ -325,7 +328,7 @@ describe("AttachmentsWidget — preview affordance", () => {
   it("opens the preview dialog, fetches content, and renders it as an image", async () => {
     const fetchContent = vi
       .fn()
-      .mockResolvedValue(new Blob(["fake"], { type: "image/png" }));
+      .mockResolvedValue({ url: "blob:mock-url", revoke: true });
     renderWithRouter(
       <AttachmentsWidgetHarness
         attachments={[IMAGE_ATTACHMENT]}

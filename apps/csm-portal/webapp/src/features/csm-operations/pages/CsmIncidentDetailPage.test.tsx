@@ -67,7 +67,7 @@ vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
   useGetCsmCaseAttachments: () => ({ data: [] }),
   usePostCsmCaseAttachment: () => ({ isPending: false, mutate: vi.fn() }),
   useDownloadCsmCaseAttachment: () => vi.fn(),
-  useGetCsmCaseAttachmentContent: () => vi.fn(),
+  useGetCsmCaseAttachmentPreviewSource: () => vi.fn(),
 }));
 vi.mock("@features/csm-cases/components/CaseActivitiesFeed", () => ({
   default: () => null,

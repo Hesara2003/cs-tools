@@ -17,20 +17,26 @@
 // Package sftpgo is an HTTP client for the small subset of SFTPGo's REST API
 // this backend calls when the SFTPGo-backed attachment-storage feature flag
 // (SFTPGO_ATTACHMENT_STORAGE_ENABLED) is on: minting a short-lived per-user
-// access token, and creating a short-lived public download share. This
+// access token (used only server-side, to authenticate this backend's own
+// calls into SFTPGo's REST API — never handed to the browser), and creating
+// short-lived shares scoped to a single storage path, either read-only
+// (public download/inline-image shares) or write-only (upload shares). This
 // package never touches attachment bytes: uploads and downloads always go
-// directly between the browser and SFTPGo using the credentials it mints
-// here — see internal/handler.AttachmentStorageHandler for the call sites.
+// directly between the browser and SFTPGo, authenticated with nothing more
+// than the share id a Share.Scope-limited share carries — never a bearer
+// token — see internal/handler.AttachmentStorageHandler for the call sites.
 package sftpgo
 
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,10 +78,27 @@ func NewClient(cfg Config) *Client {
 		publicBaseURL = cfg.BaseURL
 	}
 	return &Client{
-		http:          &http.Client{Timeout: 15 * time.Second},
+		http: &http.Client{
+			Timeout:       15 * time.Second,
+			CheckRedirect: refuseInsecureRedirect,
+		},
 		baseURL:       strings.TrimRight(cfg.BaseURL, "/"),
 		publicBaseURL: strings.TrimRight(publicBaseURL, "/"),
 	}
+}
+
+// refuseInsecureRedirect is an http.Client.CheckRedirect override that
+// refuses to follow any redirect whose target is not HTTPS. Go's default
+// CheckRedirect copies the Authorization header onto a same-host redirect,
+// which would silently leak this client's bearer token (see MintToken,
+// CreateShare) over cleartext on an HTTPS-to-HTTP downgrade redirect —
+// something a compromised or misconfigured SFTPGo instance, or a
+// man-in-the-middle, could trigger without this check.
+func refuseInsecureRedirect(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" {
+		return fmt.Errorf("sftpgo: refusing to follow redirect to non-https URL %q", req.URL.Redacted())
+	}
+	return nil
 }
 
 // BaseURL returns the configured REST API base URL, verbatim — handed back
@@ -98,7 +121,7 @@ type Token struct {
 // username is the caller's email claim, password is the caller's raw
 // gateway-issued JWT (the x-jwt-assertion header value this backend itself
 // already validated). SFTPGo's external_auth_hook (see
-// operations/sftpgo-authentication-service's /external-auth-hook)
+// integrations/sftpgo-authentication-service's /external-auth-hook)
 // independently re-validates that JWT against the same JWKS/issuer/audience
 // this backend trusts, so the "password" here is never a SFTPGo-native
 // credential — it is the same bearer token the caller already presented to
@@ -134,11 +157,15 @@ func (c *Client) MintToken(ctx context.Context, email, jwtAssertion string) (*To
 	return &tok, nil
 }
 
-// shareScopeRead is SFTPGo's Share.Scope value for a read-only (download)
-// share. Not verified against a live instance for this change — flagged
-// explicitly in the PR description alongside the other SFTPGo API-shape
-// assumptions this client makes.
-const shareScopeRead = 1
+// ShareScopeRead and ShareScopeWrite are SFTPGo's Share.Scope values for a
+// read-only (download) share and a write-only (upload) share, respectively.
+// Verified against SFTPGo's own OpenAPI spec for this change (unlike several
+// other SFTPGo API shapes elsewhere in this file, which remain unverified
+// assumptions — see their own doc comments).
+const (
+	ShareScopeRead  = 1
+	ShareScopeWrite = 2
+)
 
 // shareCreateRequest is the request body of POST /api/v2/user/shares.
 type shareCreateRequest struct {
@@ -157,17 +184,23 @@ type shareCreateResponseBody struct {
 }
 
 // CreateShare calls SFTPGo's POST /api/v2/user/shares, authenticated as the
-// caller via accessToken (minted by MintToken), to create a short-lived,
-// read-only public share for a single storage path. ttl controls how soon
-// the share expires; callers should keep this short since a share is created
-// fresh on every request that needs one (see
-// AttachmentStorageHandler.CreateAttachmentShare — this is a lazy,
-// per-attachment, per-request operation, never an eager batch one). Returns
-// the created share's id.
-func (c *Client) CreateShare(ctx context.Context, accessToken, storageKey string, ttl time.Duration) (string, error) {
+// caller via accessToken (minted by MintToken), to create a short-lived
+// share for a single storage path with the given scope (ShareScopeRead or
+// ShareScopeWrite). No password is ever set on the created share: for the
+// read-only download-share path (AttachmentStorageHandler.CreateAttachmentShare)
+// the share URL itself is the only credential handed out, and for the
+// write-only upload-share path (AttachmentStorageHandler.MintUploadToken) the
+// share id is only ever used server-to-server-adjacent, ambient in the TUS
+// Upload-Metadata the browser sends — never paired with a bearer token or
+// password. ttl controls how soon the share expires; callers should keep
+// this short since a share is created fresh on every request that needs one
+// (see CreateAttachmentShare and MintUploadToken — this is always a lazy,
+// per-request operation, never an eager batch one). Returns the created
+// share's id.
+func (c *Client) CreateShare(ctx context.Context, accessToken, storageKey string, scope int, ttl time.Duration) (string, error) {
 	reqBody, err := json.Marshal(shareCreateRequest{
 		Paths:     []string{storageKey},
-		Scope:     shareScopeRead,
+		Scope:     scope,
 		ExpiresAt: time.Now().Add(ttl).UnixMilli(),
 	})
 	if err != nil {
@@ -225,6 +258,118 @@ func (c *Client) CreateShare(ctx context.Context, accessToken, storageKey string
 // "/web/client/pubshares/{id}".
 func (c *Client) PublicShareURL(shareID string) string {
 	return c.publicBaseURL + "/web/client/pubshares/" + url.PathEscape(shareID) + "?compress=false"
+}
+
+// tusResumableVersion is the TUS protocol version this client and the
+// frontend's uploadFileViaTus both advertise via the Tus-Resumable header.
+const tusResumableVersion = "1.0.0"
+
+// UploadBytes writes data directly to SFTPGo's share-authenticated
+// chunked/TUS upload endpoint (POST /api/v2/shares-chunked-uploads, then a
+// single PATCH carrying the whole payload at offset 0), driven server-side
+// by this Go HTTP client rather than a browser.
+//
+// This mirrors, call for call, what the frontend's uploadFileViaTus does
+// against the same endpoint (see
+// apps/csm-portal/webapp/src/features/csm-cases/api/attachmentStorageTus.ts):
+// same Upload-Metadata keys (path/share_id/mkdir_parents), same
+// Tus-Resumable/Upload-Length/Upload-Offset headers, same
+// application/offset+octet-stream PATCH body. It exists because the
+// browser-driven two-phase flow (MintUploadToken + confirm) assumes the
+// caller does not yet have the file's bytes; the inline-image extraction
+// path (see internal/handler.InlineImageProcessor) has the bytes
+// synchronously in-process already decoded from a data: URI, so it drives
+// the same TUS mechanics itself rather than round-tripping through a
+// browser that was never involved.
+//
+// shareID must be a write-scoped share (see CreateShare with
+// ShareScopeWrite) whose root covers storageKey's parent directory — it is
+// the entire upload credential, exactly as for the browser path; no bearer
+// token is sent alongside it. storageKey's final path segment (after the
+// last "/") is sent as the TUS "path" metadata, matching the frontend's
+// convention of sending only the filename since the share's own root
+// already covers the directory portion.
+func (c *Client) UploadBytes(ctx context.Context, shareID, storageKey string, data []byte, contentType string) error {
+	fileName := storageKey
+	if idx := strings.LastIndex(storageKey, "/"); idx != -1 {
+		fileName = storageKey[idx+1:]
+	}
+	uploadMetadata := strings.Join([]string{
+		"path " + base64.StdEncoding.EncodeToString([]byte(fileName)),
+		"share_id " + base64.StdEncoding.EncodeToString([]byte(shareID)),
+		"mkdir_parents " + base64.StdEncoding.EncodeToString([]byte("true")),
+	}, ",")
+
+	createEndpoint := c.baseURL + "/api/v2/shares-chunked-uploads"
+	createReq, err := http.NewRequestWithContext(ctx, http.MethodPost, createEndpoint, nil)
+	if err != nil {
+		return fmt.Errorf("sftpgo: build chunked-upload create request: %w", err)
+	}
+	// No Authorization header: the share id embedded in Upload-Metadata above
+	// is the entire credential for this endpoint, exactly as for the
+	// browser-driven upload — see this method's doc comment.
+	createReq.Header.Set("Tus-Resumable", tusResumableVersion)
+	createReq.Header.Set("Upload-Length", strconv.Itoa(len(data)))
+	createReq.Header.Set("Upload-Metadata", uploadMetadata)
+
+	createResp, err := c.http.Do(createReq)
+	if err != nil {
+		return fmt.Errorf("sftpgo: chunked-upload create request: %w", err)
+	}
+	createBody, err := io.ReadAll(createResp.Body)
+	createResp.Body.Close()
+	if err != nil {
+		return fmt.Errorf("sftpgo: read chunked-upload create response: %w", err)
+	}
+	if createResp.StatusCode < http.StatusOK || createResp.StatusCode >= http.StatusMultipleChoices {
+		return &apierror.Error{StatusCode: createResp.StatusCode, Body: truncate(createBody)}
+	}
+
+	// The TUS spec returns the upload's URL via Location, which may be
+	// relative to the create endpoint's origin or an absolute URL — resolve
+	// it the same way the frontend does, and refuse to PATCH anywhere outside
+	// this client's own configured origin (a misconfigured or compromised
+	// SFTPGo instance redirecting the upload elsewhere is exactly the risk
+	// the frontend's uploadFileViaTus guards against with the same check).
+	uploadURL := createEndpoint
+	if location := createResp.Header.Get("Location"); location != "" {
+		base, err := url.Parse(createEndpoint)
+		if err != nil {
+			return fmt.Errorf("sftpgo: parse chunked-upload create endpoint: %w", err)
+		}
+		resolved, err := url.Parse(location)
+		if err != nil {
+			return fmt.Errorf("sftpgo: parse chunked-upload Location header %q: %w", location, err)
+		}
+		resolvedURL := base.ResolveReference(resolved)
+		if resolvedURL.Scheme != base.Scheme || resolvedURL.Host != base.Host {
+			return fmt.Errorf("sftpgo: refusing to upload to an untrusted origin returned by the Location header: %q", resolvedURL.Redacted())
+		}
+		uploadURL = resolvedURL.String()
+	}
+
+	patchReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, uploadURL, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("sftpgo: build chunked-upload PATCH request: %w", err)
+	}
+	patchReq.Header.Set("Tus-Resumable", tusResumableVersion)
+	patchReq.Header.Set("Upload-Offset", "0")
+	patchReq.Header.Set("Content-Type", "application/offset+octet-stream")
+	patchReq.ContentLength = int64(len(data))
+
+	patchResp, err := c.http.Do(patchReq)
+	if err != nil {
+		return fmt.Errorf("sftpgo: chunked-upload PATCH request: %w", err)
+	}
+	patchBody, err := io.ReadAll(patchResp.Body)
+	patchResp.Body.Close()
+	if err != nil {
+		return fmt.Errorf("sftpgo: read chunked-upload PATCH response: %w", err)
+	}
+	if patchResp.StatusCode < http.StatusOK || patchResp.StatusCode >= http.StatusMultipleChoices {
+		return &apierror.Error{StatusCode: patchResp.StatusCode, Body: truncate(patchBody)}
+	}
+	return nil
 }
 
 // truncate bounds body to maxErrBodyBytes for inclusion on an *apierror.Error.

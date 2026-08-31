@@ -212,7 +212,7 @@ vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
   usePostCsmCaseAttachment: () => usePostCsmCaseAttachmentMock(),
   useDownloadCsmCaseAttachment: () => vi.fn(),
   useDeleteCsmCaseAttachment: () => ({ mutate: vi.fn(), isPending: false }),
-  useGetCsmCaseAttachmentContent: () => vi.fn(),
+  useGetCsmCaseAttachmentPreviewSource: () => vi.fn(),
 }));
 vi.mock("@features/csm-cases/api/useCsmCaseCallRequests", () => ({
   useGetCsmCaseCallRequests: () => ({

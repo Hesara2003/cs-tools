@@ -261,18 +261,53 @@ func main() {
 	mainConsumers := startConsumers(ctx, "main", eventBusCfg, consumerGroup, mainConsumerCount, dispatcher.Handle, toDeadLetter)
 	dlqConsumers := startConsumers(ctx, "dlq", dlqCfg, dlqConsumerGroup, dlqConsumerCount, dispatcher.Handle, nil)
 
-	// The SLA timer engine is optional per deployment, gated on REDIS_ADDR
-	// being set — unset means this engine neither consumes sla.clock.register
-	// nor ticks, matching the "unset means don't run" convention used
-	// elsewhere in this repo's own services for an optional capability (e.g.
-	// apps/csm-portal/backend's EVENT_HUB_BROKER gate). Local Redis for now;
-	// pointing REDIS_ADDR at Azure Cache for Redis later needs no code change
-	// (same wire protocol), just its connection details here.
+	// The SLA timer engine is optional per deployment, gated on REDIS_ADDR or
+	// REDIS_URL being set — unset means this engine neither consumes
+	// sla.clock.register nor ticks, matching the "unset means don't run"
+	// convention used elsewhere in this repo's own services for an optional
+	// capability (e.g. apps/csm-portal/backend's EVENT_HUB_BROKER gate).
+	// REDIS_URL (a rediss://:<password>@<host>:<port> connection string,
+	// parsed via redis.ParseURL) is how a managed Redis with TLS — Azure
+	// Managed Redis, Azure Cache for Redis — gets configured: the "rediss"
+	// scheme makes go-redis dial with TLS automatically, which a plain
+	// REDIS_ADDR/REDIS_PASSWORD pair has no way to request. REDIS_ADDR/
+	// REDIS_PASSWORD remain for a local, non-TLS Redis and take effect only
+	// when REDIS_URL is unset.
+	//
+	// redisClient below is always a plain redis.NewClient, which only
+	// supports a non-clustered Redis (a single logical endpoint, whether
+	// that's a real standalone instance or Azure Managed Redis/Azure Cache
+	// for Redis under a non-clustered or "Enterprise" clustering policy,
+	// where Azure's own proxy hides the sharding). It does NOT support
+	// "OSS Cluster" policy — that needs a cluster-aware redis.NewClusterClient
+	// to follow MOVED/ASK redirects, which nothing here constructs. Confirm
+	// the target Redis resource's clustering policy is Enterprise/
+	// non-clustered before pointing REDIS_URL at it; OSS Cluster policy will
+	// fail unpredictably (WakeIndex's ZSET operations landing on the wrong
+	// shard) rather than at this construction site.
 	var redisClient *redis.Client
 	var slaProducer *eventbus.Producer
 	var slaConsumers []*eventbus.Consumer
-	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
-		redisClient = redis.NewClient(&redis.Options{Addr: redisAddr, Password: os.Getenv("REDIS_PASSWORD")})
+	redisURL := os.Getenv("REDIS_URL")
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisURL != "" || redisAddr != "" {
+		var redisOpts *redis.Options
+		if redisURL != "" {
+			var err error
+			redisOpts, err = redis.ParseURL(redisURL)
+			if err != nil {
+				// Deliberately not logging err itself: a malformed URL (e.g.
+				// a stray unescaped '%' in the password) makes Go's
+				// net/url.Parse embed the raw input string — password
+				// included — in its own error message, which would
+				// otherwise land straight in this log line.
+				slog.Error("invalid REDIS_URL: failed to parse connection string")
+				os.Exit(1)
+			}
+		} else {
+			redisOpts = &redis.Options{Addr: redisAddr, Password: os.Getenv("REDIS_PASSWORD")}
+		}
+		redisClient = redis.NewClient(redisOpts)
 
 		// slaengine.EntityClient talks to the exact same entity-service as
 		// customerEntityClient above — not a different backend — so it

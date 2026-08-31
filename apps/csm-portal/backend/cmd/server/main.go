@@ -101,7 +101,14 @@ func main() {
 	sftpgoAttachmentStorageEnabled, sftpgoCfg := loadSftpgoConfig()
 	var attachmentStorageHandler *handler.AttachmentStorageHandler
 	if sftpgoAttachmentStorageEnabled {
-		attachmentStorageHandler = handler.NewAttachmentStorageHandler(customerEntityClient, sftpgo.NewClient(sftpgoCfg))
+		sftpgoClientInst := sftpgo.NewClient(sftpgoCfg)
+		attachmentStorageHandler = handler.NewAttachmentStorageHandler(customerEntityClient, sftpgoClientInst)
+		// Inline-image extraction on CreateCaseComment (base64 data: URIs
+		// rewritten into real SFTPGo-backed attachments) shares the same
+		// SFTPGo client and is gated by the same flag — see
+		// CaseHandler.WithInlineImageProcessor. SN-backed comment creation is
+		// unaffected: it never reaches this branch.
+		caseHandler.WithInlineImageProcessor(handler.NewInlineImageProcessor(customerEntityClient, sftpgoClientInst))
 	}
 
 	updatesCfg := updates.Config{
@@ -153,6 +160,7 @@ func main() {
 	if attachmentStorageHandler != nil {
 		mux.HandleFunc("POST /cases/{id}/attachments/upload-token", attachmentStorageHandler.MintUploadToken)
 		mux.HandleFunc("POST /attachments/{id}/share", attachmentStorageHandler.CreateAttachmentShare)
+		mux.HandleFunc("POST /cases/{caseId}/attachments/{attachmentId}/confirm", attachmentStorageHandler.ConfirmUpload)
 	}
 	mux.HandleFunc("POST /cases/{id}/call-requests", caseHandler.CreateCallRequest)
 	mux.HandleFunc("POST /cases/{id}/call-requests/search", caseHandler.SearchCallRequests)
@@ -490,9 +498,14 @@ func mustHTTPSURL(key, value string) string {
 }
 
 // validateHTTPSURL reports an error unless value parses as a URL with scheme
-// "https", a non-empty host, and no embedded userinfo (e.g.
+// "https", a non-empty host, no embedded userinfo (e.g.
 // "https://user:pass@host/...", which could indicate a misconfigured or
-// spoofed URL).
+// spoofed URL), and no path/query/fragment beyond an empty or bare "/" path.
+// The path restriction matters beyond cosmetics: internal/sftpgo.Client
+// builds request URLs by plain string concatenation (baseURL +
+// "/api/v2/user/token", etc.), so a configured value with a path component
+// (e.g. "https://host/api") would silently double up into
+// "https://host/api/api/v2/user/token" rather than erroring.
 func validateHTTPSURL(value string) error {
 	parsed, err := url.Parse(value)
 	if err != nil {
@@ -506,6 +519,15 @@ func validateHTTPSURL(value string) error {
 	}
 	if parsed.User != nil {
 		return errors.New("must not contain embedded userinfo (e.g. \"https://user:pass@host/...\")")
+	}
+	if path := parsed.EscapedPath(); path != "" && path != "/" {
+		return fmt.Errorf("must not include a path (got %q); this value is concatenated with API paths, e.g. \"https://host\" not \"https://host/api\"", path)
+	}
+	if parsed.RawQuery != "" {
+		return errors.New("must not include a query string")
+	}
+	if parsed.Fragment != "" {
+		return errors.New("must not include a fragment")
 	}
 	return nil
 }

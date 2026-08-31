@@ -244,34 +244,6 @@ type PatchUserMeResponse struct {
 	User    PatchUserMeUpdated `json:"user"`
 }
 
-// AccountTier represents the subscription tier of an account.
-type AccountTier string
-
-const (
-	// AccountTierBasic is the standard subscription tier.
-	AccountTierBasic AccountTier = "basic"
-	// AccountTierEnterprise is the premium subscription tier.
-	AccountTierEnterprise AccountTier = "enterprise"
-)
-
-// Account represents a customer account as stored in the database.
-// TechnicalOwnerID, Region, and DeactivationDate are optional.
-type Account struct {
-	ID                  string      `json:"id"`
-	SfID                string      `json:"sfId"`
-	Name                string      `json:"name"`
-	Tier                AccountTier `json:"tier"`
-	Region              *string     `json:"region"`
-	ActivationDate      time.Time   `json:"activationDate"`
-	DeactivationDate    *time.Time  `json:"deactivationDate"`
-	OwnerID             string      `json:"ownerId"`
-	TechnicalOwnerID    *string     `json:"technicalOwnerId"`
-	AgentEnabled        bool        `json:"agentEnabled"`
-	KbReferencesEnabled bool        `json:"kbReferencesEnabled"`
-	CreatedOn           time.Time   `json:"createdOn"`
-	UpdatedOn           time.Time   `json:"updatedOn"`
-}
-
 // SearchAccountsFilters holds the optional filter criteria for an account search.
 type SearchAccountsFilters struct {
 	SearchQuery    string `json:"searchQuery,omitempty"`
@@ -286,20 +258,12 @@ type SearchAccountsRequest struct {
 	Filters    SearchAccountsFilters `json:"filters,omitempty"`
 }
 
-// SearchAccountsResponse is the paginated result of an account search.
-// HasMore is true when additional pages are available beyond the current offset.
-type SearchAccountsResponse struct {
-	Accounts []Account `json:"accounts"`
-	Total    int       `json:"total"`
-	Limit    int       `json:"limit"`
-	Offset   int       `json:"offset"`
-	HasMore  bool      `json:"hasMore"`
-}
-
-// SNAccountView is the account view returned by the ServiceNow data source.
-// Timestamp fields are kept as strings to accommodate empty values from ServiceNow.
+// AccountView is the unified account search-result shape returned for all data
+// sources. Both Postgres and ServiceNow responses are mapped to this type so
+// callers receive the same fields regardless of which backend is active.
+// Fields not available from a given data source are left nil.
 // SupportTier is returned as a plain label string (no ID).
-type SNAccountView struct {
+type AccountView struct {
 	ID                    string     `json:"id"`
 	Name                  string     `json:"name"`
 	Classification        string     `json:"classification"`
@@ -313,11 +277,11 @@ type SNAccountView struct {
 	RenewalAccountManager *PersonRef `json:"renewalAccountManager"`
 	// CreTeam is the account's CRE (customer relationship engineering) team, resolved to a
 	// named group reference (ServiceNow data source only). Mirrors AccountRef.CreTeam.
-	CreTeam *EntityRef `json:"creTeam,omitempty"`
+	CreTeam *EntityRef `json:"creTeam"`
 	// SreTeam is the account's SRE team, resolved to a named group reference (ServiceNow
 	// data source only). Mirrors AccountRef.SreTeam.
-	SreTeam          *EntityRef `json:"sreTeam,omitempty"`
-	ActivationDate   string     `json:"activationDate"`
+	SreTeam          *EntityRef `json:"sreTeam"`
+	ActivationDate   *string    `json:"activationDate"`
 	DeactivationDate *string    `json:"deactivationDate"`
 	HasAgent         bool       `json:"hasAgent"`
 	HasKbReferences  bool       `json:"hasKbReferences"`
@@ -326,13 +290,14 @@ type SNAccountView struct {
 	UpdatedOn        string     `json:"updatedOn"`
 }
 
-// SearchSNAccountsResponse is the paginated result of a ServiceNow account search.
-type SearchSNAccountsResponse struct {
-	Accounts []SNAccountView `json:"accounts"`
-	Total    int             `json:"total"`
-	Limit    int             `json:"limit"`
-	Offset   int             `json:"offset"`
-	HasMore  bool            `json:"hasMore"`
+// SearchAccountsResponse is the paginated result of an account search, unified
+// across data sources.
+type SearchAccountsResponse struct {
+	Accounts []AccountView `json:"accounts"`
+	Total    int           `json:"total"`
+	Limit    int           `json:"limit"`
+	Offset   int           `json:"offset"`
+	HasMore  bool          `json:"hasMore"`
 }
 
 // SNSupportTierRef is a compact reference to a support tier carrying its label.
@@ -341,9 +306,10 @@ type SNSupportTierRef struct {
 	Label string `json:"label"`
 }
 
-// SNAccountDetail is the full account detail returned by the ServiceNow data source
-// for GET /accounts/{id}. SupportTier is returned as an {id, label} object.
-type SNAccountDetail struct {
+// AccountDetail is the unified account detail shape returned for all data
+// sources for GET /accounts/{id}. SupportTier is returned as an {id, label}
+// object. Fields not available from a given data source are left nil.
+type AccountDetail struct {
 	ID                    string            `json:"id"`
 	Name                  string            `json:"name"`
 	Classification        string            `json:"classification"`
@@ -357,11 +323,11 @@ type SNAccountDetail struct {
 	RenewalAccountManager *PersonRef        `json:"renewalAccountManager"`
 	// CreTeam is the account's CRE (customer relationship engineering) team, resolved to a
 	// named group reference (ServiceNow data source only). Mirrors AccountRef.CreTeam.
-	CreTeam *EntityRef `json:"creTeam,omitempty"`
+	CreTeam *EntityRef `json:"creTeam"`
 	// SreTeam is the account's SRE team, resolved to a named group reference (ServiceNow
 	// data source only). Mirrors AccountRef.SreTeam.
-	SreTeam          *EntityRef `json:"sreTeam,omitempty"`
-	ActivationDate   string     `json:"activationDate"`
+	SreTeam          *EntityRef `json:"sreTeam"`
+	ActivationDate   *string    `json:"activationDate"`
 	DeactivationDate *string    `json:"deactivationDate"`
 	HasAgent         bool       `json:"hasAgent"`
 	HasKbReferences  bool       `json:"hasKbReferences"`
@@ -2345,6 +2311,28 @@ type CreateCaseGithubIssueResponse struct {
 	Issue   CaseGithubIssueDetail `json:"issue"`
 }
 
+// AttachmentStatus is the upload lifecycle state of a CSM-native (Postgres)
+// data source attachment. ServiceNow-sourced attachments have no such
+// lifecycle -- SN's /attachments API only ever returns fully-uploaded files --
+// so this is meaningful for the Postgres data source only, where the browser
+// uploads directly to SFTPGo and CSM's row can be registered before that
+// upload finishes.
+type AttachmentStatus string
+
+const (
+	// AttachmentStatusPending marks a row created before the browser has
+	// uploaded (or finished uploading) the file to SFTPGo. It exists so an
+	// orphan-file gap can't occur: if the upload never completes or the
+	// browser never calls back, CSM still has a record that something was
+	// started, for a future reconciliation job to find and clean up.
+	AttachmentStatusPending AttachmentStatus = "pending"
+	// AttachmentStatusComplete marks a row whose file is confirmed present in
+	// SFTPGo. This is the only state that has ever existed prior to this
+	// change, and remains the default for every caller that doesn't specify
+	// a status (the ServiceNow path, and any existing Postgres-path caller).
+	AttachmentStatusComplete AttachmentStatus = "complete"
+)
+
 // Attachment represents a file attachment linked to a reference entity.
 type Attachment struct {
 	ID            string        `json:"id"`
@@ -2365,6 +2353,9 @@ type Attachment struct {
 	// (SFTPGo) for CSM-native (Postgres) data source attachments. Nil for
 	// ServiceNow-sourced attachments, whose bytes are held by ServiceNow itself.
 	StorageKey *string `json:"storageKey,omitempty"`
+	// Status is the upload lifecycle state -- see AttachmentStatus. Always
+	// AttachmentStatusComplete for ServiceNow-sourced attachments.
+	Status AttachmentStatus `json:"status,omitempty"`
 }
 
 // CreateAttachmentRequest is the input for POST /attachments.
@@ -2389,6 +2380,15 @@ type CreateAttachmentRequest struct {
 	// sees the file bytes); ignored for ServiceNow, which computes it from
 	// the decoded File payload.
 	SizeBytes int `json:"sizeBytes,omitempty"`
+	// Status requests the initial lifecycle state for a CSM-native
+	// (Postgres) data source attachment -- see AttachmentStatus. Empty
+	// defaults to AttachmentStatusComplete, preserving today's behavior for
+	// every existing caller (including the ServiceNow path, which ignores
+	// this field entirely). Callers that upload directly to SFTPGo should
+	// pass AttachmentStatusPending here *before* minting the upload
+	// credential, then call CaseService.ConfirmCaseAttachment once the
+	// browser reports the upload succeeded.
+	Status AttachmentStatus `json:"status,omitempty"`
 	// CreatedBy is the resolved actor user id, wired in by the Postgres-backed
 	// service from the request's auth token before it reaches the repository.
 	// Not part of the wire contract.
@@ -2401,14 +2401,30 @@ type AttachmentDetail struct {
 	SizeBytes   int       `json:"sizeBytes"`
 	CreatedOn   time.Time `json:"createdOn"`
 	CreatedBy   string    `json:"createdBy"`
-	DownloadURL string    `json:"downloadUrl"`
+	// DownloadURL is nil for a CSM-native (Postgres) data source attachment:
+	// this service holds no download location for it, only its storage_key --
+	// resolving storage_key to an actual download location is the downstream
+	// CSM backend's job. Always non-nil for ServiceNow-sourced attachments.
+	DownloadURL *string `json:"downloadUrl"`
 	// StorageKey is set only for CSM-native (Postgres) data source attachments.
 	// See Attachment.StorageKey.
 	StorageKey *string `json:"storageKey,omitempty"`
+	// Status is the upload lifecycle state -- see AttachmentStatus. Always
+	// AttachmentStatusComplete for ServiceNow-sourced attachments.
+	Status AttachmentStatus `json:"status,omitempty"`
 }
 
 // CreateAttachmentResponse is the response for POST /cases/{id}/attachments.
 type CreateAttachmentResponse struct {
+	Message    string           `json:"message"`
+	Attachment AttachmentDetail `json:"attachment"`
+}
+
+// ConfirmAttachmentResponse is the response for POST /attachments/{id}/confirm.
+// It reports the same shape as CreateAttachmentResponse -- confirming is just
+// the second half of creating an attachment for the CSM-native (Postgres)
+// data source's two-step (pending -> complete) upload flow.
+type ConfirmAttachmentResponse struct {
 	Message    string           `json:"message"`
 	Attachment AttachmentDetail `json:"attachment"`
 }
@@ -4503,11 +4519,20 @@ type AttachmentDetails struct {
 	CreatedOn   time.Time `json:"createdOn"`
 	DownloadURL *string   `json:"downloadUrl"`
 	PreviewURL  *string   `json:"previewUrl"`
-	Content     string    `json:"content"`
+	// Content is nil for CSM-native (Postgres) data source attachments: this
+	// service holds no bytes for them -- see CaseService.GetCaseAttachmentContent.
+	// Always non-nil for ServiceNow-sourced attachments.
+	Content *string `json:"content"`
 	// StorageKey is set only for CSM-native (Postgres) data source
-	// attachments, whose Content is always "" (this service holds no bytes
-	// for them -- see CaseService.GetCaseAttachmentContent).
+	// attachments, whose Content is always nil (see above).
 	StorageKey *string `json:"storageKey,omitempty"`
+	// Status is the upload lifecycle state -- see AttachmentStatus. Always
+	// AttachmentStatusComplete for ServiceNow-sourced attachments. A
+	// 'pending' row is still returned here (unlike the default search/list
+	// response, which excludes pending rows) since a direct id lookup is how
+	// the confirm step and an uploader checking their own in-flight upload
+	// both work.
+	Status AttachmentStatus `json:"status,omitempty"`
 }
 
 // UpdateAttachmentRequest is the request body for PATCH /attachments/{id}.
@@ -5122,4 +5147,131 @@ type SetSLAClockTierRequest struct {
 type SetSLAClockTierReachedResponse struct {
 	ReachedOn      time.Time `json:"reachedOn"`
 	AlreadyReached bool      `json:"alreadyReached"`
+}
+
+// ScheduledTaskRun is the durable record of one attempted period of a
+// registered sub-cron running inside operations/csm-scheduled-tasks — a
+// single Choreo Scheduled Task that internally fans out to any number of
+// independently-scheduled jobs. See that component's own CLAUDE.md for the
+// full design ("period keys", "supersede"); this service only stores the
+// result. Like SLAClock and EventPublishFailure, this has no ServiceNow
+// equivalent and is always backed by Postgres regardless of DATA_SOURCE.
+//
+// TaskName is a caller-defined registry key, not a fixed enum — same
+// reasoning as SLAClock.ClockType: which sub-crons exist, and on what
+// schedule, is a policy decision made entirely by operations/csm-scheduled-tasks'
+// own registry, not something this service tracks.
+//
+// There is no stored status column, the same choice SLAClock makes for the
+// same reason: status is always derivable from which timestamp is set, and
+// each timestamp is independently useful on its own:
+//   - SucceededOn set → done, forever, for this period.
+//   - SupersededOn set → abandoned: the next period came due before this
+//     one ever succeeded, so it stopped being retried.
+//   - Neither set, NextRetryOn set and not in the future → eligible for
+//     another attempt right now.
+//   - Neither set, NextRetryOn nil → currently claimed: some caller is
+//     either actively running the handler, or crashed before reporting
+//     back via Complete/Fail — see ClaimScheduledTaskRunRequest's own doc
+//     comment for how Attempt tells those two cases apart.
+//
+// By construction there is at most one row per TaskName with neither
+// SucceededOn nor SupersededOn set at any given time — ScheduledTaskRunRepository.Attempt
+// enforces this by superseding any such row before claiming a new period.
+//
+// Backed by the scheduled_task_run table (singular — the one intentional
+// exception to every other table in this schema being plural).
+type ScheduledTaskRun struct {
+	ID       string `json:"id"`
+	TaskName string `json:"taskName"`
+	// PeriodKey is the sub-cron's own most-recent-scheduled-firing time at
+	// the moment this row was created — not when the row was created
+	// itself. It stays fixed for the row's whole lifetime, which is what
+	// lets every retry (however many days it spans) resolve to this same
+	// row instead of a new one.
+	PeriodKey        time.Time  `json:"periodKey"`
+	AttemptCount     int        `json:"attemptCount"`
+	LastError        *string    `json:"lastError"`
+	NextRetryOn      *time.Time `json:"nextRetryOn"`
+	FirstAttemptedOn time.Time  `json:"firstAttemptedOn"`
+	LastAttemptedOn  time.Time  `json:"lastAttemptedOn"`
+	SucceededOn      *time.Time `json:"succeededOn"`
+	SupersededOn     *time.Time `json:"supersededOn"`
+}
+
+// ClaimScheduledTaskRunRequest is the request body for
+// POST /scheduled-task-runs/attempt.
+type ClaimScheduledTaskRunRequest struct {
+	TaskName  string    `json:"taskName"`
+	PeriodKey time.Time `json:"periodKey"`
+	// StaleClaimAfterSeconds bounds how long a row that looks
+	// currently-claimed (SucceededOn, SupersededOn, and NextRetryOn all
+	// unset) is trusted before Attempt treats it as an orphaned claim — the
+	// caller that made it crashed before ever calling Complete or Fail —
+	// and allows another attempt. Defaults to 3600 (1 hour) when zero. The
+	// caller (the scheduled task's own engine) knows its own driver cadence
+	// and should generally pass a small multiple of it, not a fixed value
+	// shared across every deployment.
+	StaleClaimAfterSeconds int `json:"staleClaimAfterSeconds,omitempty"`
+}
+
+// ClaimScheduledTaskRunResponse is the response body for
+// POST /scheduled-task-runs/attempt. Allowed is the actual decision the
+// caller must act on; Run is the row's resulting state either way, so a
+// denied caller can still tell *why* — already SucceededOn, already
+// SupersededOn, a NextRetryOn still in the future, or genuinely claimed by
+// another still-live attempt.
+type ClaimScheduledTaskRunResponse struct {
+	Allowed bool             `json:"allowed"`
+	Run     ScheduledTaskRun `json:"run"`
+}
+
+// ScheduledTaskRunAttemptStatus is the value of
+// UpdateScheduledTaskRunAttemptRequest.Status — the outcome the caller is
+// reporting for the attempt it claimed. Modeled as an enum, not a bare
+// boolean, so a future third outcome (if one is ever needed) doesn't force
+// a breaking change to this request's shape.
+type ScheduledTaskRunAttemptStatus string
+
+const (
+	ScheduledTaskRunAttemptSucceeded ScheduledTaskRunAttemptStatus = "succeeded"
+	ScheduledTaskRunAttemptFailed    ScheduledTaskRunAttemptStatus = "failed"
+)
+
+// UpdateScheduledTaskRunAttemptRequest is the request body for
+// PATCH /scheduled-tasks/attempts/{id} — the single endpoint reporting an
+// attempt's outcome, replacing what used to be two separate
+// action-style endpoints (POST .../complete and POST .../fail). Status
+// picks which outcome is being reported; Error/NextRetryOn are used (and
+// required) only when Status is "failed" — ignored otherwise.
+//
+// AttemptCount must match the value
+// ClaimScheduledTaskRunResponse.Run.AttemptCount reported when this
+// caller's own Attempt call claimed the run — see
+// ScheduledTaskRunRepository.Complete's own doc comment for why this binds
+// the report to that specific claim rather than to the row's identity
+// alone. NextRetryOn is supplied by the caller, not computed here — this
+// service has no opinion on backoff policy, the same way it has no opinion
+// on SLA clock durations.
+type UpdateScheduledTaskRunAttemptRequest struct {
+	AttemptCount int                           `json:"attemptCount"`
+	Status       ScheduledTaskRunAttemptStatus `json:"status"`
+	Error        string                        `json:"error,omitempty"`
+	NextRetryOn  *time.Time                    `json:"nextRetryOn,omitempty"`
+}
+
+// ListScheduledTaskRunsResponse is the response body for
+// GET /scheduled-task-runs. Unlike this file's SearchXxxResponse types,
+// this is a plain, unpaginated list — monitoring only, not used by the
+// engine's own claim/retry logic, and by construction there is at most one
+// open row per TaskName, so the result set stays small regardless of how
+// many sub-crons are registered.
+type ListScheduledTaskRunsResponse struct {
+	Runs []ScheduledTaskRun `json:"runs"`
+}
+
+// DeleteScheduledTaskRunsResponse is the response body for
+// DELETE /scheduled-task-runs?resolvedBefore=<RFC3339 timestamp>.
+type DeleteScheduledTaskRunsResponse struct {
+	DeletedCount int `json:"deletedCount"`
 }

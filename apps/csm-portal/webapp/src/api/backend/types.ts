@@ -1193,19 +1193,59 @@ export interface BeAttachmentCreatePayload {
 }
 
 /**
+ * Request payload for `POST /cases/{id}/attachments/upload-token`. The
+ * backend never sees the file's bytes on this path, so this is the only
+ * source of truth for the attachment's metadata — it creates the
+ * attachment's row (in `"pending"` status) from exactly these fields before
+ * minting the upload share. All three of `filename`/`mimeType`/`sizeBytes`
+ * are required by the backend.
+ */
+export interface BeAttachmentUploadTokenRequest {
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  description?: string | null;
+}
+
+/**
  * Response body of `POST /cases/{id}/attachments/upload-token`. Only
- * reachable when `sftpgoAttachmentStorageEnabled` is on. `storageKey` is the
- * exact SFTPGo path to PATCH the file's bytes to (the TUS/chunked-upload
- * target), and the exact value to send back unchanged as
- * `BeAttachmentCreatePayload.storageKey` once the upload completes.
+ * reachable when `sftpgoAttachmentStorageEnabled` is on.
+ *
+ * `id` is the attachment's own id, already created server-side in `"pending"`
+ * status — it must be sent back as the path parameter to
+ * `POST /cases/{id}/attachments/{attachmentId}/confirm` once the browser's
+ * direct-to-SFTPGo upload succeeds.
+ *
+ * `shareId` is a write-scoped, passwordless SFTPGo share id restricted to
+ * `storageKey`'s parent directory. It is the entire upload credential — no
+ * bearer token is ever involved. The frontend embeds it as the `share_id` key
+ * in the TUS `Upload-Metadata` header sent to SFTPGo's
+ * `POST /shares-chunked-uploads`, and must send only `storageKey`'s final
+ * path segment (not the full `storageKey`) as the `path` key, since the
+ * share's own root already covers the directory portion.
+ *
+ * `storageKey` is the exact SFTPGo path the uploaded file must end up at.
  */
 export interface BeAttachmentUploadTokenResponse {
-  sftpgoAccessToken: string;
-  /** SFTPGo's raw `expires_at` — shape (string vs. epoch number) not relied
-   * on by the frontend; the mint call itself is what's time-boxed. */
-  expiresAt: string | number;
+  id: string;
+  shareId: string;
   sftpgoBaseUrl: string;
   storageKey: string;
+}
+
+/**
+ * Response body of `POST /cases/{caseId}/attachments/{attachmentId}/confirm`,
+ * the second half of the two-step SFTPGo upload flow
+ * `BeAttachmentUploadTokenResponse` starts: called once the browser's direct
+ * TUS upload to SFTPGo has actually succeeded, transitioning the attachment
+ * row from `"pending"` to `"complete"`.
+ */
+export interface BeAttachmentConfirmResponse {
+  message?: string;
+  attachment?: BeAttachmentDetail & {
+    /** Upload lifecycle state; `"complete"` once this call succeeds. */
+    status?: "pending" | "complete";
+  };
 }
 
 /**

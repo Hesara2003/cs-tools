@@ -36,6 +36,8 @@ type stubCaseRepo struct {
 	getCaseAttachmentByID func(ctx context.Context, id string) (domain.Attachment, error)
 	deleteCaseAttachment  func(ctx context.Context, id string) error
 	updateAttachmentName  func(ctx context.Context, id, name, updatedBy string) (time.Time, error)
+	confirmCaseAttachment func(ctx context.Context, id string) (domain.Attachment, error)
+	searchCaseComments    func(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error)
 }
 
 func (s *stubCaseRepo) CreateCase(context.Context, domain.CreateCaseRequest) (domain.Case, error) {
@@ -53,7 +55,10 @@ func (s *stubCaseRepo) SearchCases(ctx context.Context, req domain.SearchCasesRe
 func (s *stubCaseRepo) CreateCaseComment(context.Context, domain.CreateCaseCommentRequest) (domain.CaseComment, error) {
 	panic("not implemented")
 }
-func (s *stubCaseRepo) SearchCaseComments(context.Context, domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error) {
+func (s *stubCaseRepo) SearchCaseComments(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error) {
+	if s.searchCaseComments != nil {
+		return s.searchCaseComments(ctx, req)
+	}
 	panic("not implemented")
 }
 func (s *stubCaseRepo) UpdateCase(context.Context, domain.UpdateCaseRequest) (domain.Case, error) {
@@ -86,6 +91,12 @@ func (s *stubCaseRepo) DeleteCaseAttachment(ctx context.Context, id string) erro
 func (s *stubCaseRepo) UpdateCaseAttachmentName(ctx context.Context, id, name, updatedBy string) (time.Time, error) {
 	if s.updateAttachmentName != nil {
 		return s.updateAttachmentName(ctx, id, name, updatedBy)
+	}
+	panic("not implemented")
+}
+func (s *stubCaseRepo) ConfirmCaseAttachment(ctx context.Context, id string) (domain.Attachment, error) {
+	if s.confirmCaseAttachment != nil {
+		return s.confirmCaseAttachment(ctx, id)
 	}
 	panic("not implemented")
 }
@@ -283,4 +294,123 @@ func TestCaseService_SearchCases_RejectsServiceNowOnlyOptions(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCaseService_SearchCaseComments covers the Postgres-backed comment
+// listing path added to close the gap where POST /cases/{id}/comments/search
+// was never registered in routes.go, even though comment creation worked and
+// this service method (plus its repository query) was already fully
+// implemented. Exercises: empty result, a single comment, multiple comments
+// with the repository's most-recent-first ordering preserved through to the
+// response, and pagination bookkeeping (hasMore).
+func TestCaseService_SearchCaseComments(t *testing.T) {
+	caseID := "11111111-1111-1111-1111-111111111111"
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+
+	t.Run("empty case has no comments", func(t *testing.T) {
+		repo := &stubCaseRepo{
+			searchCaseComments: func(_ context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error) {
+				if req.CaseID != caseID {
+					t.Fatalf("CaseID = %q, want %q", req.CaseID, caseID)
+				}
+				return nil, 0, nil
+			},
+		}
+		svc := NewCaseService(repo, stubUserRepo{})
+
+		resp, err := svc.SearchCaseComments(context.Background(), domain.SearchCaseCommentsRequest{CaseID: caseID})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(resp.Comments) != 0 {
+			t.Errorf("Comments = %v, want empty", resp.Comments)
+		}
+		if resp.Total != 0 || resp.HasMore {
+			t.Errorf("Total = %d, HasMore = %v, want 0/false", resp.Total, resp.HasMore)
+		}
+	})
+
+	t.Run("single comment", func(t *testing.T) {
+		want := domain.CaseComment{
+			ID:        "c1",
+			CaseID:    caseID,
+			Type:      domain.CommentTypeComment,
+			Content:   "hello",
+			CreatedBy: domain.NewUserReference("u1", "jane.doe@example.com", "Jane Doe"),
+			CreatedOn: now,
+		}
+		repo := &stubCaseRepo{
+			searchCaseComments: func(context.Context, domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error) {
+				return []domain.CaseComment{want}, 1, nil
+			},
+		}
+		svc := NewCaseService(repo, stubUserRepo{})
+
+		resp, err := svc.SearchCaseComments(context.Background(), domain.SearchCaseCommentsRequest{CaseID: caseID})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(resp.Comments) != 1 || resp.Comments[0].ID != "c1" {
+			t.Fatalf("Comments = %+v, want [%+v]", resp.Comments, want)
+		}
+		if resp.Total != 1 || resp.HasMore {
+			t.Errorf("Total = %d, HasMore = %v, want 1/false", resp.Total, resp.HasMore)
+		}
+	})
+
+	t.Run("multiple comments preserve repository order and compute hasMore", func(t *testing.T) {
+		// The repository orders by created_at DESC (most recent first); the
+		// service must not re-sort, only pass the slice through.
+		newest := domain.CaseComment{ID: "c3", CaseID: caseID, CreatedOn: now}
+		middle := domain.CaseComment{ID: "c2", CaseID: caseID, CreatedOn: now.Add(-time.Hour)}
+		oldest := domain.CaseComment{ID: "c1", CaseID: caseID, CreatedOn: now.Add(-2 * time.Hour)}
+		repo := &stubCaseRepo{
+			searchCaseComments: func(_ context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error) {
+				if req.Pagination.Limit != 2 {
+					t.Fatalf("Pagination.Limit = %d, want 2 (page size requested)", req.Pagination.Limit)
+				}
+				// total (5) exceeds what's returned on this page (2 of the 3
+				// shown here is illustrative; assert against the 5 below).
+				return []domain.CaseComment{newest, middle, oldest}, 5, nil
+			},
+		}
+		svc := NewCaseService(repo, stubUserRepo{})
+
+		resp, err := svc.SearchCaseComments(context.Background(), domain.SearchCaseCommentsRequest{
+			CaseID:     caseID,
+			Pagination: domain.Pagination{Limit: 2},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		gotIDs := []string{resp.Comments[0].ID, resp.Comments[1].ID, resp.Comments[2].ID}
+		wantIDs := []string{"c3", "c2", "c1"}
+		for i := range wantIDs {
+			if gotIDs[i] != wantIDs[i] {
+				t.Errorf("Comments[%d].ID = %q, want %q (order must not be reshuffled)", i, gotIDs[i], wantIDs[i])
+			}
+		}
+		if resp.Total != 5 {
+			t.Errorf("Total = %d, want 5", resp.Total)
+		}
+		if !resp.HasMore {
+			t.Errorf("HasMore = false, want true (offset 0 + 3 returned < total 5)")
+		}
+	})
+
+	t.Run("invalid case id is rejected before reaching the repository", func(t *testing.T) {
+		repo := &stubCaseRepo{
+			searchCaseComments: func(context.Context, domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error) {
+				t.Fatal("repository should not be reached for an invalid caseId")
+				return nil, 0, nil
+			},
+		}
+		svc := NewCaseService(repo, stubUserRepo{})
+
+		_, err := svc.SearchCaseComments(context.Background(), domain.SearchCaseCommentsRequest{CaseID: "not-a-uuid"})
+		var ve *apierror.ValidationError
+		if !asValidationError(err, &ve) {
+			t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+		}
+	})
 }

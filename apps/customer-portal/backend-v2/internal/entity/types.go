@@ -1034,11 +1034,14 @@ type CreateAttachmentRequest struct {
 
 // AttachmentDetail holds the core fields returned after creating an attachment.
 type AttachmentDetail struct {
-	ID          string    `json:"id"`
-	SizeBytes   int       `json:"sizeBytes"`
-	CreatedOn   time.Time `json:"createdOn"`
-	CreatedBy   string    `json:"createdBy"`
-	DownloadURL string    `json:"downloadUrl"`
+	ID        string    `json:"id"`
+	SizeBytes int       `json:"sizeBytes"`
+	CreatedOn time.Time `json:"createdOn"`
+	CreatedBy string    `json:"createdBy"`
+	// DownloadURL is nil for a CSM-native (Postgres) data source attachment:
+	// entity-service holds no download location for it, only its storage key.
+	// Always non-nil for ServiceNow-sourced attachments.
+	DownloadURL *string `json:"downloadUrl"`
 }
 
 // CreateAttachmentResponse is entity-service's response for POST /attachments.
@@ -2044,7 +2047,10 @@ type AttachmentDetails struct {
 	CreatedOn   time.Time `json:"createdOn"`
 	DownloadURL *string   `json:"downloadUrl"`
 	PreviewURL  *string   `json:"previewUrl"`
-	Content     string    `json:"content"`
+	// Content is nil for a CSM-native (Postgres) data source attachment:
+	// entity-service holds no bytes for it, only its storage key. Always
+	// non-nil for ServiceNow-sourced attachments.
+	Content *string `json:"content"`
 }
 
 // UpdateAttachmentRequest is entity-service's request body for PATCH /attachments/{id}.

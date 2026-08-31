@@ -337,6 +337,15 @@ func (c *CustomerEntityClient) GetCaseAttachment(ctx context.Context, attachment
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/attachments/%s", url.PathEscape(attachmentID)), nil)
 }
 
+// ConfirmCaseAttachment calls POST /attachments/{attachmentId}/confirm on the
+// entity service, transitioning a 'pending' attachment row (see
+// CreateCaseAttachment's status field) to 'complete'. Used by the
+// SFTPGo-backed upload flow once the browser's direct-to-SFTPGo upload has
+// succeeded; see handler.AttachmentStorageHandler.ConfirmUpload.
+func (c *CustomerEntityClient) ConfirmCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/attachments/%s/confirm", url.PathEscape(attachmentID)), nil)
+}
+
 // SearchCatalogs calls POST /catalogs/search on the entity service.
 // Response is returned as raw JSON.
 func (c *CustomerEntityClient) SearchCatalogs(ctx context.Context, body []byte) ([]byte, error) {

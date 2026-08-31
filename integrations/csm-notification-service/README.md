@@ -142,16 +142,19 @@ Required — a record that exhausts the main consumer's retries is published her
 
 ### SLA timer engine
 
-Optional, gated on `REDIS_ADDR` — unset means `internal/slaengine` neither consumes `sla.clock.register` nor ticks. Ported from a standalone POC: registers a per-case SLA clock (durable state on entity-service's new `sla_clocks` table) when it sees a `sla.clock.register` event, tracks 50%/75%/100% elapsed via a Redis wake index, and publishes `sla.tier_reached` when a ticker finds a due entry. Local Redis for now; pointing `REDIS_ADDR` at Azure Cache for Redis later needs no code change (same wire protocol), just its connection details here.
+Optional, gated on `REDIS_URL` or `REDIS_ADDR` — unset (both) means `internal/slaengine` neither consumes `sla.clock.register` nor ticks. Ported from a standalone POC: registers a per-case SLA clock (durable state on entity-service's new `sla_clocks` table) when it sees a `sla.clock.register` event, tracks 50%/75%/100% elapsed via a Redis wake index, and publishes `sla.tier_reached` when a ticker finds a due entry.
+
+`REDIS_URL` (a `rediss://:<password>@<host>:<port>` connection string, parsed with `redis.ParseURL`) is how a managed, TLS-only Redis is configured — Azure Managed Redis, Azure Cache for Redis — since the `rediss` scheme makes go-redis dial with TLS automatically; takes priority over `REDIS_ADDR`/`REDIS_PASSWORD` when set. `REDIS_ADDR`/`REDIS_PASSWORD` remain the plain, non-TLS pair for a local Redis.
+
+The client is a plain `redis.NewClient` — it only supports a non-clustered Redis (a real standalone instance, or a managed Redis under a non-clustered/"Enterprise" clustering policy, where the provider's own proxy hides the sharding). It does **not** support "OSS Cluster" policy, which needs a cluster-aware client to follow `MOVED`/`ASK` redirects. Confirm the target resource's clustering policy before pointing `REDIS_URL` at it.
+
+This engine's own narrow `sla_clocks` client talks to the same entity-service as `CUSTOMER_ENTITY_BASE_URL`/`CUSTOMER_ENTITY_SCOPES` (see [Customer entity service](#customer-entity-service) above) — not a different backend — so it reuses those same two variables, plus the shared `OAUTH2_*` credentials (all required once `REDIS_URL` or `REDIS_ADDR` is set), rather than a redundant `SLA_ENTITY_*` pair.
 
 | Variable | Description |
 |---|---|
-This engine's own narrow `sla_clocks` client talks to the same entity-service as `CUSTOMER_ENTITY_BASE_URL`/`CUSTOMER_ENTITY_SCOPES` (see [Customer entity service](#customer-entity-service) above) — not a different backend — so it reuses those same two variables, plus the shared `OAUTH2_*` credentials (all required once `REDIS_ADDR` is set), rather than a redundant `SLA_ENTITY_*` pair.
-
-| Variable | Description |
-|---|---|
-| `REDIS_ADDR` | Redis address, e.g. `localhost:6379`. Unset disables this whole engine |
-| `REDIS_PASSWORD` | Optional — empty for a local Redis with no auth |
+| `REDIS_URL` | `rediss://:<url-encoded-password>@<host>:<port>` connection string for a TLS Redis (Azure Managed Redis/Azure Cache for Redis). Percent-encode the password if it contains `+`, `/`, or `=`. Takes priority over `REDIS_ADDR`/`REDIS_PASSWORD` |
+| `REDIS_ADDR` | Redis address for a plain, non-TLS Redis, e.g. `localhost:6379`. Ignored when `REDIS_URL` is set. Unset (with `REDIS_URL` also unset) disables this whole engine |
+| `REDIS_PASSWORD` | Optional — empty for a local Redis with no auth. Ignored when `REDIS_URL` is set |
 | `SLA_CONSUMER_GROUP` | Consumer group ID this engine's own consumer instances join — independent from `EVENT_HUB_CONSUMER_GROUP`/`EVENT_HUB_DLQ_CONSUMER_GROUP`. Optional — defaults to `csm-notification-service-sla` |
 | `SLA_CONSUMER_COUNT` | How many concurrent consumer instances to run. Optional — defaults to `1` |
 | `SLA_TICK_INTERVAL` | How often the ticker scans the Redis wake index for due tiers. Optional — defaults to `15s` |

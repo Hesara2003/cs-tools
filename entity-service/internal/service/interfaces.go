@@ -21,6 +21,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
@@ -34,6 +35,12 @@ type UserService interface {
 	// req. A ValidationError is returned for invalid input (e.g. limit > 50);
 	// any other error indicates an infrastructure failure.
 	SearchUsers(ctx context.Context, req domain.SearchUsersRequest) (domain.SearchUsersResponse, error)
+	// GetMe returns the profile of the currently authenticated user, resolved
+	// from the Postgres users table by the email claim in the caller's
+	// x-user-id-token JWT. An UnauthorizedError is returned when that header
+	// is missing; a ValidationError when the token cannot be decoded; a
+	// NotFoundError when no user row matches the email.
+	GetMe(ctx context.Context) (domain.GetUserMeResponse, error)
 }
 
 // SNUserService defines the user operations backed by the ServiceNow data source.
@@ -60,7 +67,7 @@ type AccountService interface {
 	SearchAccounts(ctx context.Context, req domain.SearchAccountsRequest) (domain.SearchAccountsResponse, error)
 	// GetAccountByID returns the account with the given UUID. A ValidationError is
 	// returned for a malformed UUID; a NotFoundError if no account matches.
-	GetAccountByID(ctx context.Context, id string) (domain.Account, error)
+	GetAccountByID(ctx context.Context, id string) (domain.AccountDetail, error)
 }
 
 // EventPublishFailureService defines the operations available on the
@@ -125,13 +132,42 @@ type SLAClockService interface {
 	SetSLAClockTierReached(ctx context.Context, caseID, clockType, tier string, req domain.SetSLAClockTierRequest) (domain.SetSLAClockTierReachedResponse, error)
 }
 
+// ScheduledTaskRunService defines the operations available on the
+// scheduled_task_run entity — see domain.ScheduledTaskRun's doc comment for
+// what it's for.
+type ScheduledTaskRunService interface {
+	// Attempt decides whether req.TaskName/req.PeriodKey may run right now,
+	// claiming it if so — see domain.ClaimScheduledTaskRunResponse's doc
+	// comment for how to read the result. A ValidationError is returned if
+	// taskName or periodKey is missing.
+	Attempt(ctx context.Context, req domain.ClaimScheduledTaskRunRequest) (domain.ClaimScheduledTaskRunResponse, error)
+	// UpdateAttempt reports the outcome of the attempt id — succeeded or
+	// failed, per req.Status — but only if req.AttemptCount still matches
+	// the active claim (see domain.UpdateScheduledTaskRunAttemptRequest's
+	// own doc comment). A ValidationError is returned if attemptCount is
+	// missing/non-positive, status isn't "succeeded"/"failed", or status is
+	// "failed" and error/nextRetryOn is missing; a NotFoundError if id
+	// doesn't exist or the claim is no longer active.
+	UpdateAttempt(ctx context.Context, id string, req domain.UpdateScheduledTaskRunAttemptRequest) (domain.ScheduledTaskRun, error)
+	// List returns every run matching statusFilter ("failed", "succeeded",
+	// "superseded"), or every run if statusFilter is empty. A
+	// ValidationError is returned for any other value.
+	List(ctx context.Context, statusFilter string) (domain.ListScheduledTaskRunsResponse, error)
+	// DeleteResolvedBefore deletes every run that succeeded or was
+	// superseded before cutoff (by its own resolution time, not when it
+	// was created — see the repository's own doc comment for why that
+	// distinction matters). A ValidationError is returned if cutoff is the
+	// zero time.
+	DeleteResolvedBefore(ctx context.Context, cutoff time.Time) (domain.DeleteScheduledTaskRunsResponse, error)
+}
+
 // SNAccountService defines the account operations backed by the ServiceNow data source.
 type SNAccountService interface {
 	// SearchAccounts returns a paginated list of ServiceNow accounts matching the
 	// filters in req.
-	SearchAccounts(ctx context.Context, req domain.SearchAccountsRequest) (domain.SearchSNAccountsResponse, error)
+	SearchAccounts(ctx context.Context, req domain.SearchAccountsRequest) (domain.SearchAccountsResponse, error)
 	// GetAccountByID returns the full account detail for the given UUID.
-	GetAccountByID(ctx context.Context, id string) (domain.SNAccountDetail, error)
+	GetAccountByID(ctx context.Context, id string) (domain.AccountDetail, error)
 }
 
 // ProjectService defines the operations available on the project entity.
@@ -301,8 +337,20 @@ type CaseService interface {
 	// open task that is visible to the customer (the authoritative case-close gate).
 	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.UpdateCaseResponse, error)
 	// CreateCaseAttachment uploads a new attachment for the case identified by req.CaseID.
-	// A ValidationError is returned for invalid input.
+	// A ValidationError is returned for invalid input. For the CSM-native (Postgres) data
+	// source, req.Status controls the initial lifecycle state (see domain.AttachmentStatus):
+	// empty/omitted and "complete" behave exactly as before this field existed; "pending"
+	// registers the row before the caller has uploaded the file to SFTPGo, to be finished off
+	// later via ConfirmCaseAttachment. ServiceNow ignores this field.
 	CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error)
+	// ConfirmCaseAttachment transitions the CSM-native (Postgres) data source attachment
+	// identified by id from status "pending" to "complete", once its file has finished
+	// uploading to SFTPGo. A NotFoundError is returned if it does not exist; a
+	// ForbiddenError if the caller did not create it; a ConflictError if it is not
+	// currently "pending" (including if it was already confirmed). Supported by the
+	// CSM-native (Postgres) data source only -- ServiceNow attachments have no such
+	// lifecycle, since SN's /attachments API only ever returns fully-uploaded files.
+	ConfirmCaseAttachment(ctx context.Context, id string) (domain.ConfirmAttachmentResponse, error)
 	// SearchCaseAttachments returns a paginated list of attachments for the case identified
 	// by req.CaseID. A ValidationError is returned for invalid input.
 	SearchCaseAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) (domain.SearchAttachmentsResponse, error)

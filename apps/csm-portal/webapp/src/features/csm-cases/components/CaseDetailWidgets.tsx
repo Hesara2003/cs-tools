@@ -58,7 +58,10 @@ import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useSearchUsers } from "@features/csm-users/api/useSearchUsers";
 import type { NormalizedUser } from "@features/csm-users/types/csmUsers";
 import AttachmentPreviewDialog from "@features/csm-cases/components/AttachmentPreviewDialog";
-import { getAttachmentPreviewKind } from "@features/csm-cases/utils/attachmentPreview";
+import {
+  getAttachmentPreviewKind,
+  type AttachmentPreviewSource,
+} from "@features/csm-cases/utils/attachmentPreview";
 import type {
   CaseAttachment,
   CaseAuditEntry,
@@ -788,8 +791,10 @@ export function AttachmentsWidget({
    * only some of the fields.
    */
   preview?: {
-    /** Fetch an attachment's raw bytes for inline preview. */
-    onGetPreviewContent: (attachment: CaseAttachment) => Promise<Blob>;
+    /** Resolve a previewable URL for an attachment's inline preview. */
+    onGetPreviewContent: (
+      attachment: CaseAttachment,
+    ) => Promise<AttachmentPreviewSource>;
     /**
      * Attachment currently shown in the preview dialog, lifted to the parent
      * page so it can be reset on case-to-case navigation (this widget stays

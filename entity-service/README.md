@@ -166,6 +166,24 @@ clock on `POST /cases/{caseId}/sla-clocks`, reads it back via `GET /cases/{caseI
 to check `pausedOn` before firing a tier, and records a crossed tier idempotently via
 `PATCH /cases/{caseId}/sla-clocks/{clockType}/tiers/{tier}` with `{"status": "reached"}`.
 
+### Scheduled task runs
+
+`scheduled_task_run` (migration `000013` — the one intentionally singular table name in this
+schema) is durable claim/retry state for `operations/csm-scheduled-tasks`, a single Choreo
+Scheduled Task that fans out to many independently-scheduled sub-crons on one shared driver
+cadence. Has no ServiceNow equivalent — always backed by Postgres. No stored status column: a row's
+state is always derivable from which timestamp is set (`succeededOn`, `supersededOn`,
+`nextRetryOn`) — see entity-service's own `CLAUDE.md` ("Scheduled task runs") for the full design
+and `operations/csm-scheduled-tasks`'s `CLAUDE.md` for the "period keys"/"supersede" reasoning
+behind it.
+
+Consumed by that component's engine, which claims a period via
+`POST /scheduled-tasks/attempts`, then reports back via
+`PATCH /scheduled-tasks/attempts/{id}` (`{attemptCount, status: "succeeded"|"failed", ...}`).
+`GET /scheduled-tasks/attempts?status=<filter>` is monitoring-only, and
+`DELETE /scheduled-tasks/attempts?resolvedBefore=<ts>` backs that same component's own self-hosted
+`housekeeping_cleanup` sub-cron (`internal/housekeeping`), which calls it daily.
+
 ## Security Scanning
 
 Run [gosec](https://github.com/securego/gosec) to check for common security issues:
