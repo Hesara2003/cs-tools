@@ -1223,10 +1223,11 @@ func TestAttachmentHandler_CallerScope(t *testing.T) {
 
 	attID := "22222222-2222-2222-2222-222222222222"
 	attachmentDetails := entity.AttachmentDetails{
-		ID:          attID,
-		ReferenceID: caseID,
-		Name:        "test.txt",
-		Type:        "text/plain",
+		ID:            attID,
+		ReferenceID:   caseID,
+		ReferenceType: entity.ReferenceTypeCase,
+		Name:          "test.txt",
+		Type:          "text/plain",
 	}
 
 	t.Run("GetAttachment: member can view metadata", func(t *testing.T) {
@@ -1375,6 +1376,31 @@ func TestAttachmentHandler_CallerScope(t *testing.T) {
 
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("GetAttachment: non-case attachment succeeds without parent case resolution", func(t *testing.T) {
+		deploymentAttID := "33333333-3333-3333-3333-333333333333"
+		deploymentAttDetails := entity.AttachmentDetails{
+			ID:            deploymentAttID,
+			ReferenceID:   "44444444-4444-4444-4444-444444444444",
+			ReferenceType: entity.ReferenceTypeDeployment,
+			Name:          "dep.yaml",
+			Type:          "text/yaml",
+		}
+		h := NewAttachmentHandler(&fakeEntityAttachmentClient{
+			attachment: deploymentAttDetails,
+		})
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /attachments/{id}", h.GetAttachment)
+		req := authedRequest(http.MethodGet, "/attachments/"+deploymentAttID, "")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 		}
 	})
 }

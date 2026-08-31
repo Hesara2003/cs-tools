@@ -65,7 +65,7 @@ func (h *AttachmentHandler) authorizeAttachmentByID(w http.ResponseWriter, r *ht
 		return entity.AttachmentDetails{}, false
 	}
 
-	if details.ReferenceID != "" && uuidRe.MatchString(details.ReferenceID) {
+	if details.ReferenceID != "" && uuidRe.MatchString(details.ReferenceID) && (details.ReferenceType == entity.ReferenceTypeCase || string(details.ReferenceType) == "case") {
 		caseView, err := h.entity.GetCase(r.Context(), details.ReferenceID)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "resolving attachment parent case failed", "userID", user.UserID, "attachmentID", id, "referenceID", details.ReferenceID, "err", summarizeErr(err))
