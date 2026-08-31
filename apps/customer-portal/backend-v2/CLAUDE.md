@@ -6,12 +6,12 @@ responses for the frontend. This is a rewrite of the existing backend at
 `apps/customer-portal/backend`, modeled on `apps/csm-portal/backend`'s conventions — read that
 backend's own CLAUDE.md too if something here is underspecified.
 
-**Status: in progress.** 107 routes are wired up so far, across seven upstream services:
+**Status: in progress.** 104 routes are wired up so far, across seven upstream services:
 entity-service, the WSO2 Updates service, SCIM, the AI chat agent, the product-consumption
 service, the registry (robot-account) service, and the project-contact onboarding service (see
 "The AI chat agent", "The product-consumption service", "The registry service", and "The
 project-contact onboarding service" below — none of the last four is entity-service-backed at
-all). Route list: `GET /health`, `GET`/`PATCH /users/me`, `POST /accounts/search`,
+all). Route list: `GET /health`, `GET`/`PATCH /users/me`,
 `GET /accounts/{id}`, `POST /projects/search`, `GET /projects/{id}`,
 `POST /projects/{id}/cases/search`,
 `GET /cases/{id}`, `POST /cases`, `PATCH /cases/{id}`, `POST /cases/{id}/comments`,
@@ -19,14 +19,14 @@ all). Route list: `GET /health`, `GET`/`PATCH /users/me`, `POST /accounts/search
 `POST /projects/{id}/deployments/search`, `POST /projects/{id}/deployments`,
 `PATCH /projects/{projectId}/deployments/{id}`,
 `POST /deployments/{deploymentId}/products/search`, `POST /deployments/{deploymentId}/products`,
-`PATCH /deployments/{deploymentId}/products/{id}`, `POST /attachments`, `POST /attachments/search`,
+`PATCH /deployments/{deploymentId}/products/{id}`, `POST /attachments`,
 `GET /attachments/{id}/content`, `DELETE /attachments/{id}`, `GET /products`,
 `POST /products/search`,
 `POST /products/{id}/versions/search`, `POST /products/vulnerabilities/search`,
 `GET /products/vulnerabilities/{id}`,
 `POST /deployments/products/{deployedProductId}/catalogs/search`,
 `GET /catalogs/{catalogId}/items/{itemId}`, `POST /projects/{id}/time-cards/search`,
-`POST /comments`, `POST /comments/search`, `POST /change-requests`,
+`POST /comments`, `POST /change-requests`,
 `POST /projects/{id}/change-requests/search`, `GET /change-requests/{id}`, `PATCH /change-requests/{id}`,
 `GET /change-requests/{id}/approvals`, `POST /change-requests/{id}/approvals/decision`,
 `POST /cases/{caseId}/call-requests`, `POST /cases/{caseId}/call-requests/search`,
@@ -406,9 +406,10 @@ a project directly — a two-hop resolution once deployment resolution exists.
 
 **Endpoints deliberately left out of this pass** (deployment/deployed-product or global resolution gap):
 the `deployments/{deploymentId}/products/*` and `deployments/products/{id}/*` fan-outs,
-and every globally-unscoped endpoint with no project id in its path at all (`accounts/search`,
-`attachments/search`, `comments/search`, `products/vulnerabilities/search`, global `/search`) — the
-mechanism here doesn't generalize to those without an account-level (not project-level) equivalent.
+and globally-unscoped endpoints with no project id in their path (`products/vulnerabilities/search`,
+global `/search`) — the mechanism here doesn't generalize to those without an account-level (not
+project-level) equivalent. (Note: the three unused global endpoints `POST /accounts/search`,
+`POST /attachments/search`, and `POST /comments/search` were removed from this backend).
 
 Note that cases already have a *separate*, already-fully-wired "my own cases" mechanism independent
 of this flag: the frontend can send `{"filters":{"createdByMe":true}}` to
@@ -529,7 +530,7 @@ including it; when in doubt whether a field is customer-appropriate, leave it ou
 a comment on the DTO struct (see `internal/dto/case.go` for examples).
 
 **Data-source normalization is a second job of the DTO layer.** Unlike projects and cases,
-entity-service's account endpoints (`GET /accounts/{id}`, `POST /accounts/search`) return a
+entity-service's account endpoints (`GET /accounts/{id}`) return a
 genuinely different wire shape depending on whether it's deployed with `DATA_SOURCE=postgres` or
 `DATA_SOURCE=servicenow` — see `internal/entity/types.go`'s `AccountDetail`/`AccountSummary`
 comments for how the two shapes are unioned into one Go struct (their JSON keys never collide) and
@@ -686,8 +687,7 @@ Two more examples, both in this same "restrict, don't mirror" category:
   labels these "agent-side fields, set when an engineer schedules or concludes the call." They're
   still exposed on the *read* side (`dto.CallRequestSummary`) since the customer should be able to
   see the outcome of their own call, just not set it themselves.
-- `POST /comments` / `POST /comments/search` (generic comments — distinct from `POST /cases/{id}/comments`,
-  these attach to any reference entity: case, conversation, change_request, deployment, incident)
+- `POST /comments` (and `GET /conversations/{id}/messages`, which searches comments internally)
   restrict in *both* directions: `dto.BuildEntityCreateCommentRequest` forces `type: comment` on
   write for the same reason as case comments, and `dto.BuildEntitySearchCommentsRequest` forces
   `filters.type: comment` on **read** too — entity-service's search endpoint returns `work_note`

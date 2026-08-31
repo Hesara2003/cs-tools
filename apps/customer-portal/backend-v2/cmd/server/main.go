@@ -298,7 +298,6 @@ func main() {
 	mux.HandleFunc("POST /deployments/products/{id}/instances/stats/usages/search", instanceHandler.SearchDeployedProductInstanceUsageStats)
 
 	mux.HandleFunc("POST /attachments", attachmentHandler.CreateAttachment)
-	mux.HandleFunc("POST /attachments/search", attachmentHandler.SearchAttachments)
 	mux.HandleFunc("GET /attachments/{id}/content", attachmentHandler.GetAttachmentContent)
 	mux.HandleFunc("GET /attachments/{id}", attachmentHandler.GetAttachment)
 	mux.HandleFunc("DELETE /attachments/{id}", attachmentHandler.DeleteAttachment)
@@ -321,11 +320,9 @@ func main() {
 	mux.HandleFunc("POST /cases/{caseId}/call-requests/search", callRequestHandler.SearchCallRequests)
 	mux.HandleFunc("PATCH /cases/{caseId}/call-requests/{id}", callRequestHandler.PatchCallRequest)
 
-	mux.HandleFunc("POST /accounts/search", accountHandler.SearchAccounts)
 	mux.HandleFunc("GET /accounts/{id}", accountHandler.GetAccount)
 
 	mux.HandleFunc("POST /comments", commentHandler.CreateComment)
-	mux.HandleFunc("POST /comments/search", commentHandler.SearchComments)
 
 	mux.HandleFunc("POST /products/vulnerabilities/search", productVulnerabilityHandler.SearchProductVulnerabilities)
 	mux.HandleFunc("GET /products/vulnerabilities/{id}", productVulnerabilityHandler.GetProductVulnerability)

@@ -31,7 +31,6 @@ import (
 // used by AttachmentHandler.
 type entityAttachmentClient interface {
 	CreateAttachment(ctx context.Context, req entity.CreateAttachmentRequest) (entity.CreateAttachmentResponse, error)
-	SearchAttachments(ctx context.Context, req entity.SearchAttachmentsRequest) (entity.SearchAttachmentsResponse, error)
 	GetAttachmentContent(ctx context.Context, id string) (body []byte, contentType string, err error)
 	DeleteAttachment(ctx context.Context, id string) (entity.DeleteAttachmentResponse, error)
 	GetAttachment(ctx context.Context, id string) (entity.AttachmentDetails, error)
@@ -74,35 +73,6 @@ func (h *AttachmentHandler) CreateAttachment(w http.ResponseWriter, r *http.Requ
 	}
 
 	writeJSONValue(w, http.StatusCreated, dto.MapAttachmentCreate(result))
-}
-
-// SearchAttachments handles POST /attachments/search.
-func (h *AttachmentHandler) SearchAttachments(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserInfoFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-
-	body, ok := readJSONBody(w, r)
-	if !ok {
-		return
-	}
-
-	var req entity.SearchAttachmentsRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-
-	result, err := h.entity.SearchAttachments(r.Context(), req)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchAttachments failed", "userID", user.UserID, "err", summarizeErr(err))
-		mapUpstreamError(w, err, "Failed to search attachments.")
-		return
-	}
-
-	writeJSONValue(w, http.StatusOK, dto.MapSearchAttachments(result))
 }
 
 // GetAttachmentContent handles GET /attachments/{id}/content. The response is

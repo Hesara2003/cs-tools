@@ -31,7 +31,6 @@ import (
 // used by CommentHandler.
 type entityCommentClient interface {
 	CreateComment(ctx context.Context, req entity.CreateCommentRequest) (entity.CreateCommentResponse, error)
-	SearchComments(ctx context.Context, req entity.SearchCommentsRequest) (entity.SearchCommentsResponse, error)
 }
 
 // CommentHandler handles HTTP requests for generic comments attached to any
@@ -86,37 +85,4 @@ func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSONValue(w, http.StatusCreated, dto.MapCommentCreate(result))
-}
-
-// SearchComments handles POST /comments/search.
-func (h *CommentHandler) SearchComments(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserInfoFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-
-	body, ok := readJSONBody(w, r)
-	if !ok {
-		return
-	}
-
-	var req dto.CommentSearchRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-	if !uuidRe.MatchString(req.ReferenceID) || !validCommentReferenceType[req.ReferenceType] {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-
-	result, err := h.entity.SearchComments(r.Context(), dto.BuildEntitySearchCommentsRequest(req))
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity SearchComments failed", "userID", user.UserID, "err", summarizeErr(err))
-		mapUpstreamError(w, err, "Failed to search comments.")
-		return
-	}
-
-	writeJSONValue(w, http.StatusOK, dto.MapSearchComments(result))
 }
