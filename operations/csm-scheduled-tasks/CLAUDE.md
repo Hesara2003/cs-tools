@@ -150,13 +150,17 @@ moved to `work_in_progress` or anything else no longer belongs here) and whose `
 before the start of yesterday, then emails a report table of them (oldest first) via
 `notify.RenderOpenCasesReport`.
 
-"Before yesterday" is a calendar-day boundary computed in UTC (start of today, truncated, minus 24
-hours), not a rolling duration like `SearchOpenCasesOlderThan`'s: a case created at 23:59 yesterday
-is excluded, one created at 00:01 the day before is included, regardless of what time of day the
-task itself runs. Same `TZ=UTC` deployment caveat as "Housekeeping" above applies to what "yesterday"
-means in the first place.
+"Before yesterday" is a calendar-day boundary computed in UTC (`time.Now().UTC().Truncate(24 *
+time.Hour)`, minus 24 hours) — always UTC, regardless of the deployment's own `TZ` setting, unlike a
+rolling duration such as `SearchOpenCasesOlderThan`'s: a case created at 23:59 yesterday (UTC) is
+excluded, one created at 00:01 the day before is included, regardless of what time of day the task
+itself runs. The "Housekeeping" section's `TZ=UTC` caveat is about something different — when the
+*cron schedule itself* fires (`internal/schedule.PeriodKey`'s own local-time interpretation) — and
+doesn't apply here: this cutoff is UTC-anchored no matter what `TZ` the process runs with.
 
-Default schedule `0 8 * * *` (daily at 08:00, after "Stale cases report"'s 07:00 slot); override via
+Default schedule `0 8 * * *` (daily at 08:00, after "Stale cases report"'s 07:00 slot — this time
+itself *is* subject to the same `TZ=UTC` caveat as "Housekeeping" above, since it's a cron schedule);
+override via
 `SUB_CRON_SCHEDULES`. Recipients work exactly like "Stale cases report" above: this task's own
 `SUB_CRON_RECIPIENTS` entry, unrelated to `ALERT_RECIPIENTS`, no report sent (and no entity-service
 query run) if empty. Shares `internal/entitycases.Client` and the row-rendering helpers in
