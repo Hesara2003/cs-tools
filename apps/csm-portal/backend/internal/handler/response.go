@@ -40,8 +40,13 @@ const (
 	ErrMsgWorkNoteOnClosedCase   = "Work notes cannot be added to a closed case."
 	ErrMsgAttachmentOnClosedCase = "Attachments cannot be added to a closed case."
 	ErrMsgAttachmentNotShareable = "This attachment is not available for direct download."
-	ErrMsgInvalidUUID            = "Invalid UUID format."
-	errMsgReadBody               = "Failed to read request body."
+	// ErrMsgAttachmentStorageUnsupportedRef is returned by the direct-upload
+	// (SFTPGo-backed) mint endpoint for a reference type whose attachments
+	// cannot be persisted through that storage mode yet — the caller should
+	// use the standard attachment upload instead.
+	ErrMsgAttachmentStorageUnsupportedRef = "Direct-upload attachment storage is not available for this item type yet. Use the standard attachment upload instead."
+	ErrMsgInvalidUUID                     = "Invalid UUID format."
+	errMsgReadBody                        = "Failed to read request body."
 )
 
 // errorBody is the JSON error payload format matching the customer-portal pattern.

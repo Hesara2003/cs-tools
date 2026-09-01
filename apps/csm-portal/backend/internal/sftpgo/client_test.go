@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -371,5 +372,60 @@ func TestClientRefusesInsecureRedirect(t *testing.T) {
 	}
 	if downgradeHit {
 		t.Error("downgrade target received a request; CheckRedirect should have refused before dialing it (Authorization would have leaked over plain HTTP)")
+	}
+}
+
+func TestRemoveFileSendsCorrectRequestShape(t *testing.T) {
+	t.Parallel()
+
+	var gotMethod, gotPath, gotQueryPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotQueryPath = r.URL.Query().Get("path")
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	client := NewClient(Config{BaseURL: srv.URL})
+
+	storageKey := "/attachments/cases/case-1/att-1/report file.pdf"
+	if err := client.RemoveFile(context.Background(), "tok-123", storageKey); err != nil {
+		t.Fatalf("RemoveFile: %v", err)
+	}
+
+	if gotMethod != http.MethodDelete {
+		t.Errorf("method = %q, want DELETE", gotMethod)
+	}
+	if gotPath != "/api/v2/user/files" {
+		t.Errorf("path = %q, want /api/v2/user/files", gotPath)
+	}
+	if gotQueryPath != storageKey {
+		t.Errorf("query path = %q, want %q (must round-trip through URL escaping unchanged)", gotQueryPath, storageKey)
+	}
+	if gotAuth != "Bearer tok-123" {
+		t.Errorf("Authorization = %q, want Bearer tok-123", gotAuth)
+	}
+}
+
+func TestRemoveFilePropagatesUpstreamError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"no such file"}`))
+	}))
+	defer srv.Close()
+
+	client := NewClient(Config{BaseURL: srv.URL})
+
+	err := client.RemoveFile(context.Background(), "tok-123", "/attachments/missing")
+	var apiErr *apierror.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %v, want *apierror.Error", err)
+	}
+	if apiErr.StatusCode != http.StatusNotFound {
+		t.Errorf("StatusCode = %d, want 404", apiErr.StatusCode)
 	}
 }

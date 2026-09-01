@@ -372,6 +372,41 @@ func (c *Client) UploadBytes(ctx context.Context, shareID, storageKey string, da
 	return nil
 }
 
+// RemoveFile deletes one stored file, addressed by its storage key, via
+// SFTPGo's DELETE /api/v2/user/files?path=... endpoint, authenticated as the
+// caller via accessToken (minted by MintToken). Used only for best-effort
+// rollback cleanup: when a multi-step flow (see
+// internal/handler.InlineImageProcessor) fails after some bytes were already
+// uploaded, the orphaned objects are removed so a rolled-back operation
+// leaves neither metadata rows nor stray files behind. The endpoint's
+// path/query shape matches SFTPGo's published OpenAPI spec but has NOT been
+// verified against a live instance for this change — callers treat a failure
+// here as log-and-continue, never as fatal, so a shape mismatch degrades to
+// an orphaned file plus an error log rather than a broken request path.
+func (c *Client) RemoveFile(ctx context.Context, accessToken, storageKey string) error {
+	endpoint := c.baseURL + "/api/v2/user/files?path=" + url.QueryEscape(storageKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("sftpgo: build file-delete request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("sftpgo: file-delete request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("sftpgo: read file-delete response: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return &apierror.Error{StatusCode: resp.StatusCode, Body: truncate(body)}
+	}
+	return nil
+}
+
 // truncate bounds body to maxErrBodyBytes for inclusion on an *apierror.Error.
 func truncate(body []byte) string {
 	if len(body) > maxErrBodyBytes {
