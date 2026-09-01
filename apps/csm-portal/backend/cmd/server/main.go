@@ -19,6 +19,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -37,6 +38,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/scim"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/sftpgo"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/updates"
@@ -95,6 +97,15 @@ func main() {
 	problemHandler := handler.NewProblemHandler(customerEntityClient)
 	incidentTaskHandler := handler.NewIncidentTaskHandler(customerEntityClient)
 	alertHandler := handler.NewAlertHandler(customerEntityClient)
+
+	// Google Chat is not yet configured for every deployment, so its spaces
+	// are read with os.Getenv (never mustEnv) — a missing or malformed value
+	// only surfaces as an error the first time an alert is sent for a product
+	// with no matching space.
+	googleChatClient := notifications.NewGoogleChatClient(notifications.GoogleChatConfig{
+		Spaces: parseGoogleChatSpaces(os.Getenv("NOTIFICATIONS_GOOGLE_CHAT_SPACES")),
+	})
+	notificationHandler := handler.NewNotificationHandler(googleChatClient, os.Getenv("CSM_PORTAL_WEB_BASE_URL"))
 
 	// SFTPGo-backed attachment storage — off by default (see loadSftpgoConfig).
 	// When disabled, no SFTPGO_* env var is read at all and neither the client
@@ -264,6 +275,8 @@ func main() {
 	mux.HandleFunc("GET /incident-tasks/{id}", incidentTaskHandler.GetIncidentTask)
 	mux.HandleFunc("POST /incident-tasks/search", incidentTaskHandler.SearchIncidentTasks)
 	mux.HandleFunc("POST /incident-tasks/aggregate", incidentTaskHandler.AggregateIncidentTasks)
+	// Called manually today; not yet wired into real incident/case creation.
+	mux.HandleFunc("POST /notifications/google-chat/alerts", notificationHandler.PostGoogleChatAlert)
 
 	// Built once and reused on both listeners below: Auth() does a real JWKS
 	// fetch (when TokenValidatorEnabled), so calling it a second time would
@@ -641,4 +654,16 @@ func splitComma(s string) []string {
 		}
 	}
 	return result
+}
+
+func parseGoogleChatSpaces(raw string) []notifications.GoogleChatSpace {
+	if raw == "" {
+		return nil
+	}
+	var spaces []notifications.GoogleChatSpace
+	if err := json.Unmarshal([]byte(raw), &spaces); err != nil {
+		slog.Error("failed to parse NOTIFICATIONS_GOOGLE_CHAT_SPACES; Google Chat alerts will be unavailable", "err", err)
+		return nil
+	}
+	return spaces
 }
