@@ -38,6 +38,8 @@ export default function CsmEngagementsPage(): JSX.Element {
       showEngagementTypeFilter
       detailBasePath="/engagements"
       hideSeverityColumn
+      enableColumnCustomization
+      columnsViewId="engagements"
       actions={
         <Button
           variant="contained"

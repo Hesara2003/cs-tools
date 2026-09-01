@@ -509,6 +509,61 @@ func TestCreateCaseComment(t *testing.T) {
 		assertErrorMessage(t, w, ErrMsgWorkNoteOnClosedCase)
 	})
 
+	t.Run("allows public comment on an announcement case with no work-in-progress state and no assigned engineer", func(t *testing.T) {
+		for _, state := range []string{"open", "published"} {
+			state := state
+			t.Run(state, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+						return []byte(`{"type":"announcement","state":"` + state + `"}`), nil
+					},
+					createCaseCommentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return []byte(`{"id":"comment-1"}`), nil
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(validPayload)))
+				r.SetPathValue("id", "case-1")
+				w := httptest.NewRecorder()
+				h.CreateCaseComment(w, r)
+				assertStatus(t, w, http.StatusCreated)
+			})
+		}
+	})
+
+	t.Run("blocks public comment on a closed announcement case", func(t *testing.T) {
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"type":"announcement","state":"closed"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(validPayload)))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.CreateCaseComment(w, r)
+		assertStatus(t, w, http.StatusConflict)
+		assertErrorMessage(t, w, ErrMsgCommentOnClosedCase)
+	})
+
+	t.Run("allows work_note on an announcement case with no assigned engineer", func(t *testing.T) {
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"type":"announcement","state":"open"}`), nil
+			},
+			createCaseCommentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"wn-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/case-1/comments", strings.NewReader(`{"type":"work_note","content":"internal note"}`)))
+		r.SetPathValue("id", "case-1")
+		w := httptest.NewRecorder()
+		h.CreateCaseComment(w, r)
+		assertStatus(t, w, http.StatusCreated)
+	})
+
 	t.Run("forwards body to entity and returns response", func(t *testing.T) {
 		var capturedCaseID string
 		var capturedBody []byte
@@ -1902,6 +1957,243 @@ func TestGetCaseAttachmentContent(t *testing.T) {
 	})
 }
 
+// ----- GetAttachment -----
+
+func TestGetAttachment(t *testing.T) {
+	const testAttachmentID = "22222222-2222-2222-2222-222222222222"
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodGet, "/attachments/"+testAttachmentID, nil)
+		r.SetPathValue("id", testAttachmentID)
+		w := httptest.NewRecorder()
+		h.GetAttachment(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty attachment ID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/attachments/", nil))
+		w := httptest.NewRecorder()
+		h.GetAttachment(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID attachment ID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/attachments/not-a-uuid", nil))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.GetAttachment(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards attachment ID and returns upstream metadata", func(t *testing.T) {
+		const upstreamResp = `{"id":"` + testAttachmentID + `","name":"screenshot.png","description":"a screenshot"}`
+		var capturedID string
+		client := &mockEntityCaseClient{
+			getAttachmentFn: func(_ context.Context, attachmentID string) ([]byte, error) {
+				capturedID = attachmentID
+				return []byte(upstreamResp), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/attachments/"+testAttachmentID, nil))
+		r.SetPathValue("id", testAttachmentID)
+		w := httptest.NewRecorder()
+		h.GetAttachment(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if capturedID != testAttachmentID {
+			t.Errorf("upstream received attachmentID %q, want %q", capturedID, testAttachmentID)
+		}
+		if w.Body.String() != upstreamResp {
+			t.Errorf("body = %q, want %q", w.Body.String(), upstreamResp)
+		}
+	})
+
+	t.Run("maps upstream errors", func(t *testing.T) {
+		for _, tc := range upstreamErrorsGeneric("Failed to retrieve attachment.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					getAttachmentFn: func(_ context.Context, _ string) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodGet, "/attachments/"+testAttachmentID, nil))
+				r.SetPathValue("id", testAttachmentID)
+				w := httptest.NewRecorder()
+				h.GetAttachment(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+// ----- UpdateAttachment -----
+
+func TestUpdateAttachment(t *testing.T) {
+	const testAttachmentID = "22222222-2222-2222-2222-222222222222"
+	const validPayload = `{"referenceId":"11111111-1111-1111-1111-111111111111","referenceType":"case","name":"renamed.png"}`
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodPatch, "/attachments/"+testAttachmentID, strings.NewReader(validPayload))
+		r.SetPathValue("id", testAttachmentID)
+		w := httptest.NewRecorder()
+		h.UpdateAttachment(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty attachment ID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/attachments/", strings.NewReader(validPayload)))
+		w := httptest.NewRecorder()
+		h.UpdateAttachment(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects non-UUID attachment ID", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/attachments/not-a-uuid", strings.NewReader(validPayload)))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.UpdateAttachment(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgInvalidUUID)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/attachments/"+testAttachmentID, strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		r.SetPathValue("id", testAttachmentID)
+		w := httptest.NewRecorder()
+		h.UpdateAttachment(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/attachments/"+testAttachmentID, strings.NewReader(`not-json`)))
+		r.SetPathValue("id", testAttachmentID)
+		w := httptest.NewRecorder()
+		h.UpdateAttachment(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	invalidBodies := []struct {
+		name string
+		body string
+	}{
+		{"null body", `null`},
+		{"array body", `[]`},
+		{"empty object", `{}`},
+		{"missing referenceId", `{"referenceType":"case","name":"renamed.png"}`},
+		{"invalid referenceId", `{"referenceId":"not-a-uuid","referenceType":"case","name":"renamed.png"}`},
+		{"invalid referenceType", `{"referenceId":"11111111-1111-1111-1111-111111111111","referenceType":"bogus","name":"renamed.png"}`},
+		{"neither name nor description", `{"referenceId":"11111111-1111-1111-1111-111111111111","referenceType":"case"}`},
+		{"unknown field", `{"referenceId":"11111111-1111-1111-1111-111111111111","referenceType":"case","name":"renamed.png","extra":"nope"}`},
+	}
+	for _, tc := range invalidBodies {
+		t.Run("rejects "+tc.name, func(t *testing.T) {
+			h := NewCaseHandler(&mockEntityCaseClient{})
+			r := withUser(httptest.NewRequest(http.MethodPatch, "/attachments/"+testAttachmentID, strings.NewReader(tc.body)))
+			r.SetPathValue("id", testAttachmentID)
+			w := httptest.NewRecorder()
+			h.UpdateAttachment(w, r)
+			assertStatus(t, w, http.StatusBadRequest)
+			assertErrorMessage(t, w, ErrMsgBadRequest)
+			assertContentType(t, w, "application/json")
+		})
+	}
+
+	t.Run("accepts description-only update with explicit null (clear)", func(t *testing.T) {
+		const payload = `{"referenceId":"11111111-1111-1111-1111-111111111111","referenceType":"deployment","description":null}`
+		client := &mockEntityCaseClient{
+			updateAttachmentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/attachments/"+testAttachmentID, strings.NewReader(payload)))
+		r.SetPathValue("id", testAttachmentID)
+		w := httptest.NewRecorder()
+		h.UpdateAttachment(w, r)
+		assertStatus(t, w, http.StatusOK)
+	})
+
+	t.Run("forwards attachment ID and body, returns 200 with upstream response", func(t *testing.T) {
+		var capturedID string
+		var capturedBody []byte
+		const upstreamResp = `{"id":"` + testAttachmentID + `","name":"renamed.png"}`
+		client := &mockEntityCaseClient{
+			updateAttachmentFn: func(_ context.Context, attachmentID string, body []byte) ([]byte, error) {
+				capturedID = attachmentID
+				capturedBody = body
+				return []byte(upstreamResp), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/attachments/"+testAttachmentID, strings.NewReader(validPayload)))
+		r.SetPathValue("id", testAttachmentID)
+		w := httptest.NewRecorder()
+		h.UpdateAttachment(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if capturedID != testAttachmentID {
+			t.Errorf("upstream received attachmentID %q, want %q", capturedID, testAttachmentID)
+		}
+		if string(capturedBody) != validPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, validPayload)
+		}
+		if w.Body.String() != upstreamResp {
+			t.Errorf("body = %q, want %q", w.Body.String(), upstreamResp)
+		}
+	})
+
+	t.Run("maps upstream errors", func(t *testing.T) {
+		for _, tc := range upstreamErrorsGeneric("Failed to update attachment.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					updateAttachmentFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPatch, "/attachments/"+testAttachmentID, strings.NewReader(validPayload)))
+				r.SetPathValue("id", testAttachmentID)
+				w := httptest.NewRecorder()
+				h.UpdateAttachment(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
 func TestCreateCaseGithubIssue(t *testing.T) {
 	const caseID = "11111111-1111-1111-1111-111111111111"
 
@@ -2673,6 +2965,237 @@ func TestSearchTagsQuery(t *testing.T) {
 				r := withUser(httptest.NewRequest(http.MethodGet, "/tags/search?q=micro", nil))
 				w := httptest.NewRecorder()
 				h.SearchTagsQuery(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+func TestAggregateCases(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodPost, "/cases/aggregate", strings.NewReader(`{}`))
+		w := httptest.NewRecorder()
+		h.AggregateCases(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/aggregate", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		w := httptest.NewRecorder()
+		h.AggregateCases(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/aggregate", strings.NewReader(`not-json`)))
+		w := httptest.NewRecorder()
+		h.AggregateCases(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body to upstream and returns 200 with response", func(t *testing.T) {
+		const reqPayload = `{"filters":{},"groupBy":"state","maxGroups":12}`
+		var capturedBody []byte
+		client := &mockEntityCaseClient{
+			aggregateCasesFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"groups":[{"key":"open","label":"Open","count":3}],"othersCount":1,"totalRecords":4}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/aggregate", strings.NewReader(reqPayload)))
+		w := httptest.NewRecorder()
+		h.AggregateCases(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["totalRecords"] != float64(4) {
+			t.Errorf("totalRecords = %v, want 4", resp["totalRecords"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrorsGeneric("Failed to aggregate cases.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					aggregateCasesFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/aggregate", strings.NewReader(`{}`)))
+				w := httptest.NewRecorder()
+				h.AggregateCases(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+func TestSearchFeedback(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodPost, "/cases/feedback/search", strings.NewReader(`{}`))
+		w := httptest.NewRecorder()
+		h.SearchFeedback(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/feedback/search", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		w := httptest.NewRecorder()
+		h.SearchFeedback(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/feedback/search", strings.NewReader(`not-json`)))
+		w := httptest.NewRecorder()
+		h.SearchFeedback(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body to upstream and returns 200", func(t *testing.T) {
+		reqPayload := `{"filters":{"accountIds":["acc-1"],"dateFrom":"2026-01-01","dateTo":"2026-02-01"},"page":1,"pageSize":20}`
+		var capturedBody []byte
+		client := &mockEntityCaseClient{
+			searchFeedbackFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"results":[{"instanceId":"fb-1","caseId":"case-1","rating":5,"ratingLabel":"Satisfied","comment":null,"submittedAt":"2026-01-15T00:00:00Z"}],"totalRecords":1}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/feedback/search", strings.NewReader(reqPayload)))
+		w := httptest.NewRecorder()
+		h.SearchFeedback(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["totalRecords"] != float64(1) {
+			t.Errorf("totalRecords = %v, want 1", resp["totalRecords"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrorsGeneric("Failed to search case feedback.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					searchFeedbackFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/feedback/search", strings.NewReader(`{}`)))
+				w := httptest.NewRecorder()
+				h.SearchFeedback(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}
+
+func TestAggregateFeedback(t *testing.T) {
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodPost, "/cases/feedback/aggregate", strings.NewReader(`{}`))
+		w := httptest.NewRecorder()
+		h.AggregateFeedback(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/feedback/aggregate", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
+		w := httptest.NewRecorder()
+		h.AggregateFeedback(w, r)
+		assertStatus(t, w, http.StatusRequestEntityTooLarge)
+		assertErrorMessage(t, w, ErrMsgTooLarge)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects invalid JSON body", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/feedback/aggregate", strings.NewReader(`not-json`)))
+		w := httptest.NewRecorder()
+		h.AggregateFeedback(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards body to upstream and returns 200", func(t *testing.T) {
+		reqPayload := `{"filters":{"accountIds":["acc-1"]},"bucket":"week"}`
+		var capturedBody []byte
+		client := &mockEntityCaseClient{
+			aggregateFeedbackFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"buckets":[{"bucketStart":"2026-01-05","avgRating":4.2,"count":3}],"totalRecords":3}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/feedback/aggregate", strings.NewReader(reqPayload)))
+		w := httptest.NewRecorder()
+		h.AggregateFeedback(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["totalRecords"] != float64(3) {
+			t.Errorf("totalRecords = %v, want 3", resp["totalRecords"])
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrorsGeneric("Failed to aggregate case feedback.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityCaseClient{
+					aggregateFeedbackFn: func(_ context.Context, _ []byte) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewCaseHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/feedback/aggregate", strings.NewReader(`{}`)))
+				w := httptest.NewRecorder()
+				h.AggregateFeedback(w, r)
 				assertStatus(t, w, tc.wantCode)
 				assertErrorMessage(t, w, tc.wantMsg)
 				assertContentType(t, w, "application/json")

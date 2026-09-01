@@ -307,3 +307,31 @@ func TestSNProjectContactService_GetProjectContact_UnlinkedRowsDoNotMatch(t *tes
 		t.Fatalf("GetProjectContact error = %v, want NotFoundError", err)
 	}
 }
+
+// TestSNProjectService_GetProjectByID_MapsHasSr verifies that ServiceNow's own
+// precomputed "hasSr" (service-request eligibility) field is parsed from the
+// project-detail response and passed through into domain.ProjectDetailsView
+// unmodified.
+func TestSNProjectService_GetProjectByID_MapsHasSr(t *testing.T) {
+	projectSysid := sysid32('9')
+
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": projectSysid, "name": "SR Eligible", "key": "SRE", "sfId": "sf-1",
+			"createdOn": "2026-01-01 00:00:00", "startDate": "2026-01-01", "endDate": "2026-12-31",
+			"type":    map[string]any{"name": "Subscription"},
+			"account": map[string]any{"id": "", "name": ""},
+			"hasSr":   true,
+		})
+	}))
+
+	svc := NewServiceNowProjectService(client, nil)
+	got, err := svc.GetProjectByID(contextWithUserIDToken("token"), sysidToUUID(projectSysid))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.HasSr {
+		t.Errorf("GetProjectByID HasSr = false, want true (passthrough of SN's hasSr)")
+	}
+}

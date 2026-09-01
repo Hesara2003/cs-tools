@@ -182,7 +182,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 
 	var caseGithubIssueHandler *handler.CaseGithubIssueHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
-		caseGithubIssueHandler = handler.NewCaseGithubIssueHandler(service.NewServiceNowCaseGithubIssueService(serviceNowIntegrationServiceClient))
+		caseGithubIssueHandler = handler.NewCaseGithubIssueHandler(service.NewServiceNowCaseGithubIssueService(serviceNowIntegrationServiceClient, activeCaseSvc))
 	}
 
 	var changeRequestHandler *handler.ChangeRequestHandler
@@ -200,6 +200,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		catalogHandler = handler.NewCatalogHandler(service.NewServiceNowCatalogService(serviceNowIntegrationServiceClient))
 	}
 
+	var feedbackHandler *handler.FeedbackHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		feedbackHandler = handler.NewFeedbackHandler(service.NewServiceNowFeedbackService(serviceNowIntegrationServiceClient))
+	}
+
 	var productVulnerabilityHandler *handler.ProductVulnerabilityHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		productVulnerabilityHandler = handler.NewProductVulnerabilityHandler(service.NewServiceNowProductVulnerabilityService(serviceNowIntegrationServiceClient))
@@ -213,6 +218,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 	var problemHandler *handler.ProblemHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		problemHandler = handler.NewProblemHandler(service.NewServiceNowProblemService(serviceNowIntegrationServiceClient))
+	}
+
+	var alertHandler *handler.AlertHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		alertHandler = handler.NewAlertHandler(service.NewServiceNowAlertService(serviceNowIntegrationServiceClient))
+	}
+
+	var smartAlertHandler *handler.SmartAlertHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		smartAlertHandler = handler.NewSmartAlertHandler(service.NewServiceNowSmartAlertService(serviceNowIntegrationServiceClient))
 	}
 
 	var incidentTaskHandler *handler.IncidentTaskHandler
@@ -364,7 +379,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 	mux.HandleFunc("PATCH /cases/{id}", caseHandler.PatchCase)
 	mux.HandleFunc("POST /cases", caseHandler.CreateCase)
 	mux.HandleFunc("POST /cases/search", caseHandler.SearchCases)
-	mux.HandleFunc("POST /cases/group-by", caseHandler.GroupCasesBy)
+	mux.HandleFunc("POST /cases/aggregate", caseHandler.AggregateCases)
+	if feedbackHandler != nil {
+		mux.HandleFunc("POST /cases/feedback/search", feedbackHandler.SearchFeedback)
+		mux.HandleFunc("POST /cases/feedback/aggregate", feedbackHandler.AggregateFeedback)
+	}
 	mux.HandleFunc("POST /cases/{id}/comments", caseHandler.CreateCaseComment)
 	mux.HandleFunc("POST /cases/{id}/comments/search", caseHandler.SearchCaseComments)
 	mux.HandleFunc("POST /cases/{id}/activities/search", caseHandler.SearchCaseActivities)
@@ -400,7 +419,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 	if changeRequestHandler != nil {
 		mux.HandleFunc("POST /change-requests", changeRequestHandler.CreateChangeRequest)
 		mux.HandleFunc("POST /change-requests/search", changeRequestHandler.SearchChangeRequests)
-		mux.HandleFunc("POST /change-requests/group-by", changeRequestHandler.GroupChangeRequestsBy)
+		mux.HandleFunc("POST /change-requests/aggregate", changeRequestHandler.AggregateChangeRequests)
 		mux.HandleFunc("GET /change-requests/{id}", changeRequestHandler.GetChangeRequest)
 		mux.HandleFunc("PATCH /change-requests/{id}", changeRequestHandler.PatchChangeRequest)
 		mux.HandleFunc("GET /change-requests/{id}/approvals", changeRequestHandler.GetChangeRequestApprovals)
@@ -465,21 +484,30 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		mux.HandleFunc("PATCH /incidents/{id}", incidentHandler.PatchIncident)
 		mux.HandleFunc("POST /incidents", incidentHandler.CreateIncident)
 		mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
-		mux.HandleFunc("POST /incidents/group-by", incidentHandler.GroupIncidentsBy)
+		mux.HandleFunc("POST /incidents/aggregate", incidentHandler.AggregateIncidents)
 		mux.HandleFunc("POST /incidents/{id}/activities/search", incidentHandler.SearchIncidentActivities)
 	}
 
 	if problemHandler != nil {
 		mux.HandleFunc("POST /problems", problemHandler.CreateProblem)
 		mux.HandleFunc("POST /problems/search", problemHandler.SearchProblems)
-		mux.HandleFunc("POST /problems/group-by", problemHandler.GroupProblemsBy)
+		mux.HandleFunc("POST /problems/aggregate", problemHandler.AggregateProblems)
 		mux.HandleFunc("GET /problems/{id}", problemHandler.GetProblem)
+		mux.HandleFunc("PATCH /problems/{id}", problemHandler.PatchProblem)
 	}
 
 	if incidentTaskHandler != nil {
 		mux.HandleFunc("POST /incident-tasks/search", incidentTaskHandler.SearchIncidentTasks)
-		mux.HandleFunc("POST /incident-tasks/group-by", incidentTaskHandler.GroupIncidentTasksBy)
+		mux.HandleFunc("POST /incident-tasks/aggregate", incidentTaskHandler.AggregateIncidentTasks)
 		mux.HandleFunc("GET /incident-tasks/{id}", incidentTaskHandler.GetIncidentTask)
+	}
+
+	if alertHandler != nil {
+		mux.HandleFunc("GET /alerts/{id}", alertHandler.GetAlert)
+	}
+
+	if smartAlertHandler != nil {
+		mux.HandleFunc("GET /smart-alerts/{id}", smartAlertHandler.GetSmartAlert)
 	}
 
 	if conversationHandler != nil {

@@ -124,6 +124,18 @@ export default function ProductVulnerabilitiesTab(): JSX.Element {
           sx={{ minWidth: 140 }}
           slotProps={{
             htmlInput: { "aria-label": "Filter by priority" },
+            // oxygen-ui's own theme (MuiInputLabel styleOverrides) shifts an
+            // unshrunk label up by `top: -7px` for any Select-backed field —
+            // see `MultiSelectField.tsx`'s doc comment for the full story.
+            // `shrink`/`notched` (rather than MUI's focus-driven default)
+            // match this field's own value state instead of only reacting
+            // to focus, and `top: "0px !important"` is the only way to win
+            // the cascade against that compound theme selector.
+            inputLabel: {
+              shrink: priorityFilter !== "",
+              sx: { top: "0px !important" },
+            },
+            select: { notched: priorityFilter !== "" },
           }}
         >
           <MenuItem value="">All priorities</MenuItem>

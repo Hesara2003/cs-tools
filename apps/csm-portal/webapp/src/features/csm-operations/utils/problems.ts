@@ -55,6 +55,44 @@ export function problemStateColor(state?: string | null): ChipColor {
 }
 
 /**
+ * The single forward transition legal from a given state, per the live
+ * 6-state ServiceNow Problem Management engine (`CHANGES-problem-update.md`
+ * §1/§3) — a strictly linear chain, unlike Incident/Change Request, which
+ * both allow multiple legal next states from a given point. `null` once the
+ * problem is `CLOSED` (terminal) or in a state this CSM-platform doesn't
+ * expose a forward action for. `Mark Duplicate`/`Cancel`/`Re-Analyze` are
+ * deliberately not modeled here — see the contract doc's "Not built" note.
+ */
+const PROBLEM_TRANSITIONS: Partial<
+  Record<BeProblemState, { transition: string; target: BeProblemState }>
+> = {
+  NEW: { transition: "assess", target: "ASSESS" },
+  ASSESS: { transition: "confirm", target: "ROOT_CAUSE_ANALYSIS" },
+  ROOT_CAUSE_ANALYSIS: { transition: "fix", target: "FIX_IN_PROGRESS" },
+  FIX_IN_PROGRESS: { transition: "resolve", target: "RESOLVED" },
+  RESOLVED: { transition: "close", target: "CLOSED" },
+};
+
+export interface ProblemNextTransition {
+  /** The `transition` key to send in the `PATCH /problems/{id}` body. */
+  transition: string;
+  /** The state this transition moves the problem into, for the button label. */
+  target: BeProblemState;
+}
+
+/**
+ * The one legal forward transition from `current`, or `null` if there isn't
+ * one (terminal state, or an unrecognized value from a future backend
+ * state this CSM-platform guardrail doesn't know about yet).
+ */
+export function getNextProblemTransition(
+  current?: BeProblemState | null,
+): ProblemNextTransition | null {
+  if (!current) return null;
+  return PROBLEM_TRANSITIONS[current] ?? null;
+}
+
+/**
  * Filters for the problems list. Deliberately just search + state — see the
  * caveat on `BeProblemSearchFilters.states` in `api/backend/types.ts` (not yet
  * confirmed live against the backend).

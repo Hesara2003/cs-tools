@@ -17,20 +17,13 @@
 import {
   Box,
   Button,
-  Checkbox,
   Divider,
-  FormControl,
   Grid,
   IconButton,
   InputAdornment,
-  InputLabel,
-  ListItemText,
-  MenuItem,
   Paper,
-  Select,
   TextField,
 } from "@wso2/oxygen-ui";
-import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import { ChevronDown, ChevronUp, ListFilter, Search, X } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, type JSX } from "react";
 import type { BeProblemState } from "@api/backend/types";
@@ -40,6 +33,7 @@ import {
   problemStateLabel,
   type ProblemFilters,
 } from "@features/csm-operations/utils/problems";
+import MultiSelectField from "@components/MultiSelectField";
 
 interface ProblemsFilterBarProps {
   filters: ProblemFilters;
@@ -73,12 +67,8 @@ export default function ProblemsFilterBar({
     [],
   );
 
-  const handleStateChange = (event: SelectChangeEvent<string[]>): void => {
-    const val = event.target.value;
-    onChange({
-      ...filters,
-      states: (Array.isArray(val) ? val : [val]) as BeProblemState[],
-    });
+  const handleStateChange = (next: BeProblemState[]): void => {
+    onChange({ ...filters, states: next });
   };
 
   return (
@@ -143,33 +133,13 @@ export default function ProblemsFilterBar({
           <Divider />
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <FormControl fullWidth size="small">
-                <InputLabel id="problem-filter-state-label">State</InputLabel>
-                <Select
-                  multiple
-                  labelId="problem-filter-state-label"
-                  id="problem-filter-state"
-                  value={filters.states}
-                  label="State"
-                  onChange={handleStateChange}
-                  renderValue={(selected) =>
-                    (selected as string[])
-                      .map((v) => stateOptions.find((o) => o.value === v)?.label ?? v)
-                      .join(", ")
-                  }
-                >
-                  {stateOptions.map((opt) => (
-                    <MenuItem key={opt.value} value={opt.value} sx={{ py: 0.5 }}>
-                      <Checkbox
-                        size="small"
-                        checked={filters.states.includes(opt.value)}
-                        sx={{ mr: 1, p: 0.25 }}
-                      />
-                      <ListItemText primary={opt.label} />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <MultiSelectField
+                id="problem-filter-state"
+                label="State"
+                values={filters.states}
+                options={stateOptions}
+                onChange={handleStateChange}
+              />
             </Grid>
           </Grid>
         </>

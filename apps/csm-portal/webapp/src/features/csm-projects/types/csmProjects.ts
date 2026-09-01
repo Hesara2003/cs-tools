@@ -89,6 +89,9 @@ export interface ProjectDetails {
   updatedOn: string;
   /** Free-form closure-state string; see {@link Project.closureState}. */
   closureState: string | null;
+  /** Whether this project is eligible to raise service requests, as
+   *  precomputed by the backing data source. */
+  hasSr?: boolean;
 }
 
 export interface SearchProjectsRequest {
@@ -107,4 +110,21 @@ export interface SearchProjectsResponse {
   limit: number;
   offset: number;
   hasMore: boolean;
+}
+
+/**
+ * A file attached to a deployment (`referenceType: "deployment"` on the
+ * shared, reference-generic `/attachments*` endpoints — see
+ * `BeAttachment` in `@api/backend/types`).
+ */
+export interface DeploymentAttachment {
+  id: string;
+  name: string;
+  /** MIME type (e.g. image/png, application/pdf). */
+  contentType: string;
+  sizeBytes: number;
+  description?: string | null;
+  uploadedBy: string;
+  uploadedOn: string;
+  downloadUrl?: string | null;
 }

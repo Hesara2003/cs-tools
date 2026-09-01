@@ -21,20 +21,14 @@ import {
   Checkbox,
   DatePickers,
   Divider,
-  FormControl,
   FormControlLabel,
   Grid,
   IconButton,
   InputAdornment,
-  InputLabel,
-  ListItemText,
-  MenuItem,
   Paper,
-  Select,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import { ChevronDown, ChevronUp, ListFilter, Search, X } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, type JSX } from "react";
 import type { BeIncidentPriority } from "@api/backend/types";
@@ -45,6 +39,7 @@ import {
   type IncidentFilters,
 } from "@features/csm-operations/utils/incidents";
 import IncidentProductMultiSelect from "@features/csm-operations/components/IncidentProductMultiSelect";
+import MultiSelectField from "@components/MultiSelectField";
 
 const { DatePicker, LocalizationProvider } = DatePickers;
 
@@ -125,12 +120,8 @@ export default function IncidentsFilterBar({
     [],
   );
 
-  const handlePriorityChange = (event: SelectChangeEvent<string[]>): void => {
-    const val = event.target.value;
-    onChange({
-      ...filters,
-      priorities: (Array.isArray(val) ? val : [val]) as BeIncidentPriority[],
-    });
+  const handlePriorityChange = (next: BeIncidentPriority[]): void => {
+    onChange({ ...filters, priorities: next });
   };
 
   /**
@@ -220,33 +211,13 @@ export default function IncidentsFilterBar({
           <Divider />
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <FormControl fullWidth size="small">
-                <InputLabel id="incident-filter-priority-label">Priority</InputLabel>
-                <Select
-                  multiple
-                  labelId="incident-filter-priority-label"
-                  id="incident-filter-priority"
-                  value={filters.priorities}
-                  label="Priority"
-                  onChange={handlePriorityChange}
-                  renderValue={(selected) =>
-                    (selected as string[])
-                      .map((v) => priorityOptions.find((o) => o.value === v)?.label ?? v)
-                      .join(", ")
-                  }
-                >
-                  {priorityOptions.map((opt) => (
-                    <MenuItem key={opt.value} value={opt.value} sx={{ py: 0.5 }}>
-                      <Checkbox
-                        size="small"
-                        checked={filters.priorities.includes(opt.value)}
-                        sx={{ mr: 1, p: 0.25 }}
-                      />
-                      <ListItemText primary={opt.label} />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <MultiSelectField
+                id="incident-filter-priority"
+                label="Priority"
+                values={filters.priorities}
+                options={priorityOptions}
+                onChange={handlePriorityChange}
+              />
             </Grid>
 
             <Grid size={{ xs: 12, sm: 6, md: 4 }}>

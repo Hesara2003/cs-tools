@@ -15,8 +15,11 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { buildCloneChangeRequestNavState } from "@features/csm-operations/utils/changeRequests";
-import type { BeChangeRequestDetail } from "@api/backend/types";
+import {
+  buildCloneChangeRequestNavState,
+  changeRequestBlockingReason,
+} from "@features/csm-operations/utils/changeRequests";
+import type { BeChangeRequestApproval, BeChangeRequestDetail } from "@api/backend/types";
 
 const FULL_CR: BeChangeRequestDetail = {
   id: "chg-1",
@@ -144,5 +147,76 @@ describe("buildCloneChangeRequestNavState", () => {
     });
     expect(state.description).not.toContain("<script>");
     expect(state.description).toContain("Safe");
+  });
+});
+
+describe("changeRequestBlockingReason", () => {
+  function approval(overrides: Partial<BeChangeRequestApproval>): BeChangeRequestApproval {
+    return {
+      stage: "Assess",
+      approverType: "STATIC_GROUP",
+      approverName: null,
+      status: "APPROVED",
+      approvers: [],
+      ...overrides,
+    };
+  }
+
+  it("returns null when there are no approval stages yet", () => {
+    expect(changeRequestBlockingReason(undefined)).toBeNull();
+    expect(changeRequestBlockingReason([])).toBeNull();
+  });
+
+  it("returns null when every stage is settled (approved/rejected/not required)", () => {
+    expect(
+      changeRequestBlockingReason([
+        approval({ status: "APPROVED" }),
+        approval({ stage: "Authorize", status: "NOT_REQUIRED" }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("names the stage when a stage is REQUESTED and has no named approver group", () => {
+    expect(
+      changeRequestBlockingReason([approval({ stage: "Authorize", status: "REQUESTED" })]),
+    ).toBe("Awaiting Authorize approval");
+  });
+
+  it("treats PENDING the same as REQUESTED", () => {
+    expect(
+      changeRequestBlockingReason([approval({ stage: "Assess", status: "PENDING" })]),
+    ).toBe("Awaiting Assess approval");
+  });
+
+  it("names the approver group instead of the stage when one is present", () => {
+    expect(
+      changeRequestBlockingReason([
+        approval({ stage: "Authorize", status: "REQUESTED", approverName: "Devops Approval" }),
+      ]),
+    ).toBe("Awaiting Devops Approval");
+  });
+
+  it("does not double the word 'approval' when the approver name already carries it", () => {
+    const reason = changeRequestBlockingReason([
+      approval({ status: "REQUESTED", approverName: "Security Approval Board" }),
+    ]);
+    expect(reason).toBe("Awaiting Security Approval Board");
+    expect(reason?.match(/approval/gi)).toHaveLength(1);
+  });
+
+  it("returns the first waiting stage, in stage order, when several are unsettled", () => {
+    expect(
+      changeRequestBlockingReason([
+        approval({ stage: "Assess", status: "APPROVED" }),
+        approval({ stage: "Authorize", status: "REQUESTED" }),
+        approval({ stage: "Customer Approval", status: "PENDING" }),
+      ]),
+    ).toBe("Awaiting Authorize approval");
+  });
+
+  it("is case-insensitive on the status value", () => {
+    expect(
+      changeRequestBlockingReason([approval({ stage: "Assess", status: "requested" })]),
+    ).toBe("Awaiting Assess approval");
   });
 });

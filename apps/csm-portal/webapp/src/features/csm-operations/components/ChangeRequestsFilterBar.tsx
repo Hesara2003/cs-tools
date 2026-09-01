@@ -18,23 +18,15 @@ import {
   AdapterDateFns,
   Box,
   Button,
-  Checkbox,
   DatePickers,
   Divider,
-  FormControl,
   Grid,
   IconButton,
   InputAdornment,
-  InputLabel,
-  ListItemText,
-  MenuItem,
   Paper,
-  Select,
   TextField,
-  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import type { SelectChangeEvent } from "@wso2/oxygen-ui";
 import {
   ChevronDown,
   ChevronUp,
@@ -51,6 +43,7 @@ import {
   countActiveCRFilters,
   type ChangeRequestFilters,
 } from "@features/csm-operations/utils/changeRequests";
+import MultiSelectField from "@components/MultiSelectField";
 
 const { DatePicker, LocalizationProvider } = DatePickers;
 
@@ -80,73 +73,6 @@ interface ChangeRequestsFilterBarProps {
   onFiltersToggle: () => void;
 }
 
-interface MultiSelectFieldProps<T extends string> {
-  id: string;
-  label: string;
-  values: T[];
-  options: { value: T; label: string }[];
-  onChange: (next: T[]) => void;
-}
-
-function MultiSelectField<T extends string>({
-  id,
-  label,
-  values,
-  options,
-  onChange,
-}: MultiSelectFieldProps<T>): JSX.Element {
-  const handleChange = (event: SelectChangeEvent<string[]>): void => {
-    const val = event.target.value;
-    onChange((Array.isArray(val) ? val : [val]) as T[]);
-  };
-  return (
-    <FormControl fullWidth size="small">
-      <InputLabel id={`${id}-label`}>{label}</InputLabel>
-      <Select
-        multiple
-        labelId={`${id}-label`}
-        id={id}
-        value={values as unknown as string[]}
-        label={label}
-        onChange={handleChange}
-        renderValue={(selected) => {
-          if (!Array.isArray(selected) || selected.length === 0) return "";
-          const labels = selected.map(
-            (v) => options.find((o) => o.value === v)?.label ?? v,
-          );
-          const text = labels.join(", ");
-          if (labels.length === 1) return text;
-          return (
-            <Tooltip title={text} placement="top">
-              <Box
-                component="span"
-                sx={{
-                  display: "block",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {text}
-              </Box>
-            </Tooltip>
-          );
-        }}
-      >
-        {options.map((opt) => (
-          <MenuItem key={opt.value} value={opt.value} sx={{ py: 0.5 }}>
-            <Checkbox
-              size="small"
-              checked={values.includes(opt.value)}
-              sx={{ mr: 1, p: 0.25 }}
-            />
-            <ListItemText primary={opt.label} />
-          </MenuItem>
-        ))}
-      </Select>
-    </FormControl>
-  );
-}
 
 export default function ChangeRequestsFilterBar({
   filters,

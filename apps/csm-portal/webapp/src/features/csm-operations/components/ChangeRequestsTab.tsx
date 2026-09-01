@@ -34,7 +34,11 @@ import { useLocation, useSearchParams } from "react-router";
 import { useNavTransition } from "@hooks/useNavTransition";
 import QueryErrorState from "@components/QueryErrorState";
 import FilteredCsvExportButton from "@components/FilteredCsvExportButton";
+import ColumnCustomizerButton from "@components/column-customizer/ColumnCustomizerButton";
+import { useCurrentUser } from "@context/current-user/CurrentUserContext";
+import { getColumnPreferencesUserKey, useColumnPreferences } from "@hooks/useColumnPreferences";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
+import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { useBackendApi } from "@api/backend/client";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { useSearchChangeRequests } from "@features/csm-operations/api/useSearchChangeRequests";
@@ -51,6 +55,11 @@ import {
   readChangeRequestFiltersFromUrl,
   writeChangeRequestFiltersToUrl,
 } from "@features/csm-operations/utils/changeRequestsFiltersUrl";
+import {
+  CHANGE_REQUEST_OPTIONAL_COLUMNS,
+  DEFAULT_VISIBLE_CHANGE_REQUEST_COLUMNS,
+  type ChangeRequestOptionalColumnId,
+} from "@features/csm-operations/utils/changeRequestListColumns";
 import ChangeRequestsFilterBar from "@features/csm-operations/components/ChangeRequestsFilterBar";
 import RefreshButton from "@components/RefreshButton";
 import type {
@@ -58,6 +67,47 @@ import type {
   BeChangeRequestSearchResponse,
   BeChangeRequestSearchView,
 } from "@api/backend/types";
+
+const CHANGE_REQUEST_OPTIONAL_COLUMN_IDS = Object.keys(
+  CHANGE_REQUEST_OPTIONAL_COLUMNS,
+) as ChangeRequestOptionalColumnId[];
+
+function renderOptionalCell(
+  id: ChangeRequestOptionalColumnId,
+  cr: BeChangeRequestSearchView,
+): JSX.Element {
+  switch (id) {
+    case "project":
+      return <>{cr.project?.name || "—"}</>;
+    case "impact":
+      return cr.impact ? (
+        <Chip
+          size="small"
+          variant="outlined"
+          color={changeRequestImpactColor(cr.impact)}
+          label={changeRequestImpactLabel(cr.impact)}
+        />
+      ) : (
+        <>—</>
+      );
+    case "plannedStart":
+      return <>{formatDate(cr.plannedStartOn)}</>;
+    case "plannedEnd":
+      return <>{formatDate(cr.plannedEndOn)}</>;
+    case "product":
+      return <>{cr.product?.name || "—"}</>;
+    case "assignedEngineer":
+      return <>{cr.assignedEngineer?.name || "—"}</>;
+    case "assignedTeam":
+      return <>{cr.assignedTeam?.name || "—"}</>;
+    case "type":
+      return <>{cr.type || "—"}</>;
+    case "case":
+      return <>{cr.case?.name || "—"}</>;
+    case "createdOn":
+      return <>{formatDate(cr.createdOn)}</>;
+  }
+}
 
 const DEFAULT_ROWS_PER_PAGE = 20;
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
@@ -124,6 +174,25 @@ export default function ChangeRequestsTab(): JSX.Element {
 
   const changeRequests = data?.changeRequests ?? [];
   const total = data?.total ?? 0;
+
+  // "Customise columns" — see `caseListColumns.ts`'s equivalent doc comment;
+  // the default visible set below is exactly the table's pre-existing fixed
+  // set so a returning user sees no change until they open the picker.
+  const currentUserEmail = useIdTokenClaims()?.email;
+  const currentUserId = useCurrentUser().user?.id;
+  const columnPrefs = useColumnPreferences({
+    viewId: "change-requests",
+    userKey: getColumnPreferencesUserKey({ id: currentUserId, email: currentUserEmail }),
+    columns: CHANGE_REQUEST_OPTIONAL_COLUMN_IDS.map((id) => ({
+      id,
+      label: CHANGE_REQUEST_OPTIONAL_COLUMNS[id].label,
+    })),
+    defaultVisibleIds: DEFAULT_VISIBLE_CHANGE_REQUEST_COLUMNS,
+  });
+  const visibleOptionalColumns = columnPrefs.visibleColumns.map(
+    (c) => c.id as ChangeRequestOptionalColumnId,
+  );
+  const columnCount = 4 + visibleOptionalColumns.length; // Number, Subject, State, Updated + optional
 
   const setFilters = useCallback(
     (next: ChangeRequestFilters) => {
@@ -221,6 +290,18 @@ export default function ChangeRequestsTab(): JSX.Element {
         onFiltersToggle={() => setIsFiltersOpen((prev: boolean) => !prev)}
       />
 
+      <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+        <ColumnCustomizerButton
+          allColumns={columnPrefs.allColumns}
+          isVisible={columnPrefs.isVisible}
+          onToggle={columnPrefs.toggleColumn}
+          onMove={columnPrefs.moveColumn}
+          onReorder={columnPrefs.reorderColumn}
+          onReset={columnPrefs.resetToDefault}
+          label="Customise change request columns"
+        />
+      </Box>
+
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
         <TableContainer>
           <Table size="small" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
@@ -228,10 +309,10 @@ export default function ChangeRequestsTab(): JSX.Element {
               <TableRow sx={{ bgcolor: "action.hover" }}>
                 <TableCell>Number</TableCell>
                 <TableCell>Subject</TableCell>
-                <TableCell>Project</TableCell>
+                {visibleOptionalColumns.map((id) => (
+                  <TableCell key={id}>{CHANGE_REQUEST_OPTIONAL_COLUMNS[id].label}</TableCell>
+                ))}
                 <TableCell>State</TableCell>
-                <TableCell>Impact</TableCell>
-                <TableCell>Planned start</TableCell>
                 <TableCell>Updated</TableCell>
               </TableRow>
             </TableHead>
@@ -241,16 +322,16 @@ export default function ChangeRequestsTab(): JSX.Element {
                   <TableRow key={i}>
                     <TableCell><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
                     <TableCell><Skeleton variant="rounded" width="90%" height={18} /></TableCell>
-                    <TableCell><Skeleton variant="rounded" width="85%" height={18} /></TableCell>
+                    {visibleOptionalColumns.map((id) => (
+                      <TableCell key={id}><Skeleton variant="rounded" width="80%" height={18} /></TableCell>
+                    ))}
                     <TableCell><Skeleton variant="rounded" width={72} height={22} /></TableCell>
-                    <TableCell><Skeleton variant="rounded" width={60} height={22} /></TableCell>
-                    <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
                     <TableCell><Skeleton variant="rounded" width={80} height={18} /></TableCell>
                   </TableRow>
                 ))
               ) : isError ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center">
+                  <TableCell colSpan={columnCount} align="center">
                     <QueryErrorState
                       message={error instanceof Error && error.message.trim() ? error.message : "Failed to load change requests."}
                       error={error}
@@ -259,7 +340,7 @@ export default function ChangeRequestsTab(): JSX.Element {
                 </TableRow>
               ) : changeRequests.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={columnCount} align="center" sx={{ py: 4 }}>
                     <Typography variant="body2" color="text.secondary">
                       No change requests found.
                     </Typography>
@@ -283,7 +364,9 @@ export default function ChangeRequestsTab(): JSX.Element {
                         {cr.subject || "—"}
                       </Typography>
                     </TableCell>
-                    <TableCell>{cr.project?.name || "—"}</TableCell>
+                    {visibleOptionalColumns.map((id) => (
+                      <TableCell key={id}>{renderOptionalCell(id, cr)}</TableCell>
+                    ))}
                     <TableCell>
                       {cr.state ? (
                         <Chip
@@ -296,19 +379,6 @@ export default function ChangeRequestsTab(): JSX.Element {
                         "—"
                       )}
                     </TableCell>
-                    <TableCell>
-                      {cr.impact ? (
-                        <Chip
-                          size="small"
-                          variant="outlined"
-                          color={changeRequestImpactColor(cr.impact)}
-                          label={changeRequestImpactLabel(cr.impact)}
-                        />
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                    <TableCell>{formatDate(cr.plannedStartOn)}</TableCell>
                     <TableCell>{formatDate(cr.updatedOn)}</TableCell>
                   </TableRow>
                 ))
