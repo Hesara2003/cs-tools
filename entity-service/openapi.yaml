@@ -12106,6 +12106,15 @@ components:
         referenceId:
           type: string
           format: uuid
+        referenceType:
+          allOf:
+            - $ref: '#/components/schemas/ReferenceType'
+          description: >
+            The entity type referenceId points at. Always populated for CSM-native
+            (Postgres) data source attachments; omitted when the backing data source's
+            attachment-details lookup does not report a reference type. Callers
+            authorizing access per referenced resource must treat an absent value as
+            unknown and fail closed.
         name:
           type: string
         type:
