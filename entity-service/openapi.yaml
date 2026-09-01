@@ -4893,7 +4893,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CaseFeedback'
+                $ref: '#/components/schemas/CaseEmojiFeedback'
         "400":
           description: Bad request.
           content:
@@ -8673,49 +8673,6 @@ components:
       properties:
         message:
           type: string
-
-    UpdateAttachmentRequest:
-      type: object
-      required: [referenceId, referenceType]
-      description: >-
-        At least one of name or description must be provided. referenceId/referenceType scope
-        the update the same way SearchAttachmentsRequest does. description is nullable: an
-        explicit null clears it, distinct from an omitted field (which leaves it unchanged).
-      properties:
-        referenceId:
-          type: string
-          format: uuid
-        referenceType:
-          $ref: '#/components/schemas/ReferenceType'
-        name:
-          type: string
-        description:
-          type: string
-          nullable: true
-      anyOf:
-        - required: [name]
-        - required: [description]
-
-    UpdatedAttachment:
-      type: object
-      required: [id, updatedOn, updatedBy]
-      properties:
-        id:
-          type: string
-          format: uuid
-        updatedOn:
-          type: string
-          format: date-time
-        updatedBy:
-          type: string
-
-    UpdateAttachmentResponse:
-      type: object
-      properties:
-        message:
-          type: string
-        attachment:
-          $ref: '#/components/schemas/UpdatedAttachment'
 
     ChangeRequestFieldFilter:
       type: object
@@ -12971,7 +12928,7 @@ components:
         selectedImage:
           type: string
 
-    CaseFeedback:
+    CaseEmojiFeedback:
       type: object
       description: The response for GET /cases/{id}/feedback.
       required: [id, emoji, chips, assessmentId, createdBy, createdOn]
