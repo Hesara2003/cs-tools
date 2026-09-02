@@ -12107,9 +12107,14 @@ components:
           type: string
           format: uuid
         referenceType:
+          type: string
           nullable: true
-          allOf:
-            - $ref: '#/components/schemas/ReferenceType'
+          enum:
+            - case
+            - conversation
+            - change_request
+            - deployment
+            - incident
           description: >
             The entity type referenceId points at. Always populated for CSM-native
             (Postgres) data source attachments; null when the backing data source's
