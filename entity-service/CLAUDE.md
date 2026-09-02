@@ -29,12 +29,23 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 
 | Variable      | Required | Default | Purpose                   |
 |---------------|----------|---------|---------------------------|
-| `DB_HOST`     | yes      | —       | PostgreSQL hostname        |
-| `DB_PORT`     | yes      | —       | PostgreSQL port            |
-| `DB_USER`     | yes      | —       | Database user              |
-| `DB_PASSWORD` | yes      | —       | Database password          |
-| `DB_NAME`     | yes      | —       | Database name              |
+| `DB_HOST`     | no       | `localhost` | PostgreSQL hostname    |
+| `DB_PORT`     | no       | `5432`  | PostgreSQL port            |
+| `DB_USER`     | yes*     | —       | Database user              |
+| `DB_PASSWORD` | yes*     | —       | Database password          |
+| `DB_NAME`     | yes*     | —       | Database name              |
 | `DB_SSLMODE`  | no       | —       | `disable` or `require`    |
+
+\* `DB_USER`/`DB_PASSWORD`/`DB_NAME` are required when `DATA_SOURCE=postgres`
+and **optional** when `DATA_SOURCE=servicenow`, where entity reads and writes
+go to the SN integration service instead. They are all-or-nothing in both
+modes — `Config.Validate` rejects a partial set, so a typo can't silently
+disable the Postgres-only endpoints. With `DATA_SOURCE=servicenow` and no
+database, `Config.HasDatabase` is false, `cmd/api/main.go` opens no pool, and
+`NewRouter` skips registering the two Postgres-only feature sets
+(`/event-publish-failures*`, `/cases/{caseId}/sla-clocks*`), which then 404.
+A failed Event Hub publish is logged instead of recorded — see
+`EventPublisherService.Publish`'s nil-`failures` branch.
 | `SERVER_PORT` | no       | `8080`  | HTTP listen port           |
 | `EVENT_HUB_BROKER` | no | — | Kafka-compatible bootstrap address; feature-gates `EventPublisherService` (see "Event Hub publishing" below) |
 | `EVENT_HUB_CONNECTION_STRING` | no* | — | Event Hub namespace Shared Access Policy connection string. *Required once `EVENT_HUB_BROKER` is set |
