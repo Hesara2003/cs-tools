@@ -41,12 +41,19 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 	userSvc := service.NewUserService(userRepo)
 	userHandler := handler.NewUserHandler(userSvc)
 
-	// event_publish_failures has no ServiceNow equivalent — always backed by
-	// Postgres regardless of cfg.DataSource, same as the pool itself (see
-	// db.NewPool's call site in cmd/api/main.go).
-	eventPublishFailureRepo := repository.NewEventPublishFailureRepository(db)
-	eventPublishFailureSvc := service.NewEventPublishFailureService(eventPublishFailureRepo)
-	eventPublishFailureHandler := handler.NewEventPublishFailureHandler(eventPublishFailureSvc)
+	// event_publish_failures has no ServiceNow equivalent — it is Postgres-only
+	// regardless of cfg.DataSource. But the database itself is optional when
+	// DATA_SOURCE=servicenow (see config.Config.HasDatabase), so db may be
+	// nil here, and a nil pool panics on first query rather than at
+	// construction. Gate the whole chain on it: nil handler means the routes
+	// below are never registered, and nil service means EventPublisherService
+	// records nothing rather than dereferencing a nil pool.
+	var eventPublishFailureSvc service.EventPublishFailureService
+	var eventPublishFailureHandler *handler.EventPublishFailureHandler
+	if db != nil {
+		eventPublishFailureSvc = service.NewEventPublishFailureService(repository.NewEventPublishFailureRepository(db))
+		eventPublishFailureHandler = handler.NewEventPublishFailureHandler(eventPublishFailureSvc)
+	}
 
 	// EventPublisherService is optional, like every ServiceNow-only
 	// dependency below — gated on EventHubBroker rather than cfg.DataSource,
@@ -68,17 +75,21 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		)
 	}
 
-	// sla_clocks has no ServiceNow equivalent either — same reasoning as
-	// event_publish_failures above.
-	slaClockRepo := repository.NewSLAClockRepository(db)
-	slaClockHandler := handler.NewSLAClockHandler(service.NewSLAClockService(slaClockRepo))
+	// sla_clocks has no ServiceNow equivalent either, and is gated on the pool
+	// for the same reason as event_publish_failures above.
+	var slaClockHandler *handler.SLAClockHandler
+	if db != nil {
+		slaClockHandler = handler.NewSLAClockHandler(service.NewSLAClockService(repository.NewSLAClockRepository(db)))
+	}
 
 	// scheduled_task_run has no ServiceNow equivalent either — same
 	// reasoning as sla_clocks/event_publish_failures above. Backs
 	// operations/csm-scheduled-tasks; see that component's own CLAUDE.md
 	// and this service's CLAUDE.md ("Scheduled task runs").
-	scheduledTaskRunRepo := repository.NewScheduledTaskRunRepository(db)
-	scheduledTaskRunHandler := handler.NewScheduledTaskRunHandler(service.NewScheduledTaskRunService(scheduledTaskRunRepo))
+	var scheduledTaskRunHandler *handler.ScheduledTaskRunHandler
+	if db != nil {
+		scheduledTaskRunHandler = handler.NewScheduledTaskRunHandler(service.NewScheduledTaskRunService(repository.NewScheduledTaskRunRepository(db)))
+	}
 
 	accountRepo := repository.NewAccountRepository(db)
 	accountHandler := handler.NewAccountHandler(service.NewAccountService(accountRepo))
@@ -292,18 +303,28 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 
 	mux.HandleFunc("GET /health", handler.HealthCheck)
 
-	// event_publish_failures is not data-source specific, same rationale as
-	// the role catalogue and team registry below — registered unconditionally.
-	mux.HandleFunc("POST /event-publish-failures", eventPublishFailureHandler.CreateEventPublishFailure)
-	mux.HandleFunc("POST /event-publish-failures/search", eventPublishFailureHandler.SearchEventPublishFailures)
-	mux.HandleFunc("POST /event-publish-failures/{id}/resolve", eventPublishFailureHandler.ResolveEventPublishFailure)
-	mux.HandleFunc("POST /cases/{caseId}/sla-clocks", slaClockHandler.RegisterSLAClock)
-	mux.HandleFunc("GET /cases/{caseId}/sla-clocks/{clockType}", slaClockHandler.GetSLAClock)
-	mux.HandleFunc("PATCH /cases/{caseId}/sla-clocks/{clockType}/tiers/{tier}", slaClockHandler.SetSLAClockTierReached)
-	mux.HandleFunc("POST /scheduled-tasks/attempts", scheduledTaskRunHandler.AttemptScheduledTaskRun)
-	mux.HandleFunc("PATCH /scheduled-tasks/attempts/{id}", scheduledTaskRunHandler.UpdateScheduledTaskRunAttempt)
-	mux.HandleFunc("GET /scheduled-tasks/attempts", scheduledTaskRunHandler.ListScheduledTaskRuns)
-	mux.HandleFunc("DELETE /scheduled-tasks/attempts", scheduledTaskRunHandler.DeleteScheduledTaskRuns)
+	// event_publish_failures, sla_clocks and scheduled_task_run are not
+	// data-source specific, but all three are Postgres-backed, and the
+	// database is optional when DATA_SOURCE=servicenow — so unlike the role
+	// catalogue and team registry below, these are registered only when a
+	// pool exists. With no database they 404 rather than panicking on a nil
+	// pool.
+	if eventPublishFailureHandler != nil {
+		mux.HandleFunc("POST /event-publish-failures", eventPublishFailureHandler.CreateEventPublishFailure)
+		mux.HandleFunc("POST /event-publish-failures/search", eventPublishFailureHandler.SearchEventPublishFailures)
+		mux.HandleFunc("POST /event-publish-failures/{id}/resolve", eventPublishFailureHandler.ResolveEventPublishFailure)
+	}
+	if slaClockHandler != nil {
+		mux.HandleFunc("POST /cases/{caseId}/sla-clocks", slaClockHandler.RegisterSLAClock)
+		mux.HandleFunc("GET /cases/{caseId}/sla-clocks/{clockType}", slaClockHandler.GetSLAClock)
+		mux.HandleFunc("PATCH /cases/{caseId}/sla-clocks/{clockType}/tiers/{tier}", slaClockHandler.SetSLAClockTierReached)
+	}
+	if scheduledTaskRunHandler != nil {
+		mux.HandleFunc("POST /scheduled-tasks/attempts", scheduledTaskRunHandler.AttemptScheduledTaskRun)
+		mux.HandleFunc("PATCH /scheduled-tasks/attempts/{id}", scheduledTaskRunHandler.UpdateScheduledTaskRunAttempt)
+		mux.HandleFunc("GET /scheduled-tasks/attempts", scheduledTaskRunHandler.ListScheduledTaskRuns)
+		mux.HandleFunc("DELETE /scheduled-tasks/attempts", scheduledTaskRunHandler.DeleteScheduledTaskRuns)
+	}
 
 	if snUserHandler != nil {
 		mux.HandleFunc("GET /users/{id}", snUserHandler.GetUser)
