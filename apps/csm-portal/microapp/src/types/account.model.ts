@@ -14,13 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { AccountDto, AccountTier } from "./account.dto";
+import type { AccountDto } from "./account.dto";
 
 export interface Account {
   id: string;
   sfId: string;
   name: string;
-  tier: AccountTier;
+  /** Display label for the tier, or null when the data source has none.
+   *  Resolved from `tier` (PG-native lowercase enum) or `supportTier`
+   *  (ServiceNow label / ref) — callers get one field either way. */
+  tier: string | null;
   region: string | null;
   activationDate: string;
   deactivationDate: string | null;
@@ -36,6 +39,15 @@ export interface Account {
   updatedOn: string;
 }
 
+// `tier` (PG-native) and `supportTier` (unified AccountView) are the same concept
+// under two names and two shapes; resolve to one display label here so no page
+// has to know which data source an account came from.
+function resolveTier(dto: AccountDto): string | null {
+  if (dto.tier) return dto.tier;
+  if (typeof dto.supportTier === "string") return dto.supportTier || null;
+  return dto.supportTier?.label ?? null;
+}
+
 // Resolves the PG-native-vs-ServiceNow-sourced dual shape once here (see AccountDto's own
 // comment), so nothing downstream has to know about ownerId-vs-owner / agentEnabled-vs-hasAgent —
 // callers just get a plain Account.
@@ -44,7 +56,7 @@ export function toAccount(dto: AccountDto): Account {
     id: dto.id,
     sfId: dto.sfId,
     name: dto.name,
-    tier: dto.tier,
+    tier: resolveTier(dto),
     region: dto.region ?? null,
     activationDate: dto.activationDate,
     deactivationDate: dto.deactivationDate ?? null,

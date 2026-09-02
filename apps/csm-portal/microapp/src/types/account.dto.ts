@@ -16,6 +16,11 @@
 
 export type AccountTier = "basic" | "enterprise";
 
+export interface SupportTierRefDto {
+  id: string;
+  label: string;
+}
+
 /** A resolved `{id, name}` reference, as returned for ServiceNow-sourced accounts —
  * mirrors the webapp's own AccountOwnerRef (csm-accounts/types/csmAccounts.ts). */
 export interface AccountOwnerRefDto {
@@ -37,7 +42,13 @@ export interface AccountDto {
   id: string;
   sfId: string;
   name: string;
-  tier: AccountTier;
+  /** PG-native accounts carry this lowercase enum. The unified AccountView no
+   *  longer emits it for either data source — see `supportTier`. */
+  tier?: AccountTier;
+  /** The unified AccountView's replacement for `tier`: a plain label string on
+   *  the search/list view, an {id, label} ref on the detail view, and null for
+   *  Postgres-backed accounts (the PG schema has no support tier column). */
+  supportTier?: string | SupportTierRefDto | null;
   region?: string | null;
   activationDate: string;
   deactivationDate?: string | null;
