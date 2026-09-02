@@ -833,7 +833,7 @@ func (s *caseService) GetAttachmentByID(ctx context.Context, id string) (domain.
 	return domain.AttachmentDetails{
 		ID:            a.ID,
 		ReferenceID:   a.ReferenceID,
-		ReferenceType: a.ReferenceType,
+		ReferenceType: &a.ReferenceType,
 		Name:          a.Name,
 		Type:          a.Type,
 		SizeBytes:     a.SizeBytes,

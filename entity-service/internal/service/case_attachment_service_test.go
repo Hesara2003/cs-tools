@@ -469,8 +469,8 @@ func TestCaseService_GetAttachmentByID_ReturnsStorageKeyNotContent(t *testing.T)
 	if details.ReferenceID != testCaseID {
 		t.Fatalf("expected referenceId %q, got %q", testCaseID, details.ReferenceID)
 	}
-	if details.ReferenceType != domain.ReferenceTypeCase {
-		t.Fatalf("expected referenceType %q, got %q", domain.ReferenceTypeCase, details.ReferenceType)
+	if details.ReferenceType == nil || *details.ReferenceType != domain.ReferenceTypeCase {
+		t.Fatalf("expected referenceType %q, got %v", domain.ReferenceTypeCase, details.ReferenceType)
 	}
 }
 

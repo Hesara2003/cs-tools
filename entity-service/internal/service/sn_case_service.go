@@ -2872,9 +2872,10 @@ func (s *snCaseService) GetAttachmentByID(ctx context.Context, id string) (domai
 		return domain.AttachmentDetails{}, fmt.Errorf("sn get attachment: parse createdOn %q: %w", snResp.CreatedOn, err)
 	}
 
-	// ReferenceType is left empty: the upstream attachment-details response
-	// carries no reference type (see snAttachmentDetails), and there is no
-	// way to derive one from the id alone. Callers must fail closed on it.
+	// ReferenceType is left nil (serialized as JSON null): the upstream
+	// attachment-details response carries no reference type (see
+	// snAttachmentDetails), and there is no way to derive one from the id
+	// alone. Callers must fail closed on it.
 	return domain.AttachmentDetails{
 		ID:          sysidToUUID(snResp.ID),
 		ReferenceID: sysidToUUID(snResp.ReferenceID),

@@ -4512,11 +4512,11 @@ type AttachmentDetails struct {
 	ReferenceID string `json:"referenceId"`
 	// ReferenceType identifies which entity type ReferenceID points at (see
 	// ReferenceType). Always populated for CSM-native (Postgres) data source
-	// attachments; empty when the backing data source's attachment-details
-	// lookup does not report a reference type. Callers authorizing access per
-	// referenced resource must treat an empty value as unknown and fail
-	// closed.
-	ReferenceType ReferenceType `json:"referenceType,omitempty"`
+	// attachments; nil (JSON null) when the backing data source's
+	// attachment-details lookup does not report a reference type. Callers
+	// authorizing access per referenced resource must treat a nil value as
+	// unknown and fail closed.
+	ReferenceType *ReferenceType `json:"referenceType"`
 	Name          string        `json:"name"`
 	Type          string        `json:"type"`
 	SizeBytes     int           `json:"sizeBytes"`
