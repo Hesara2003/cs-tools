@@ -5322,6 +5322,12 @@ components:
           description: >-
             Internal-only worst-case fix-commitment date (date-only, YYYY-MM-DD), visible
             to CSM engineers only (ServiceNow only).
+        workaroundProvided:
+          type: boolean
+          description: >-
+            Mark (true) or recall (false) the case's workaround. Stamps the calling
+            engineer as the provider and pauses the case's Workaround SLA clock while
+            set; recalling clears both (ServiceNow only).
 
     UpdateCaseResponse:
       type: object
@@ -6171,6 +6177,18 @@ components:
             Engineer who acknowledged the case, or null if nobody has. Cleared by the
             backing data source when the case's type or severity changes or it is
             reopened, so a materially changed case has to be acknowledged again.
+        workaroundProvidedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            When the case's workaround was marked provided, or null until marked (and
+            cleared again on recall). Pauses the case's Workaround SLA clock while set
+            (ServiceNow only).
+        workaroundProvidedBy:
+          nullable: true
+          $ref: '#/components/schemas/AssignedEngineerRef'
+          description: Engineer who marked the workaround as provided, or null until marked.
         parentCase:
           nullable: true
           $ref: '#/components/schemas/CaseNumberRef'
