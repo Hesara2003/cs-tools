@@ -533,7 +533,10 @@ export function WatchersWidget({
   const reasonId = useId();
   const followReasonId = useId();
   const watcherIds = useMemo(() => watchers.map((w) => w.id), [watchers]);
-  const isFollowing = watchers.some((w) => w.isMe);
+  // Keyed on the UUID, not `isMe`: both page callers derive `isMe` from an
+  // email match, which is unreliable when email data is missing, whereas
+  // `currentUserId` is the same UUID the watch list itself is keyed by.
+  const isFollowing = !!currentUserId && watcherIds.includes(currentUserId);
 
   // Below the floor the record type allows, removal isn't expressible at all
   // (see WATCH_LIST_RULES), so the control is blocked with the reason rather
