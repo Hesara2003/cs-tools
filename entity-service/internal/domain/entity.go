@@ -2397,10 +2397,10 @@ type CreateAttachmentRequest struct {
 
 // AttachmentDetail holds the core fields returned after creating an attachment.
 type AttachmentDetail struct {
-	ID          string    `json:"id"`
-	SizeBytes   int       `json:"sizeBytes"`
-	CreatedOn   time.Time `json:"createdOn"`
-	CreatedBy   string    `json:"createdBy"`
+	ID        string    `json:"id"`
+	SizeBytes int       `json:"sizeBytes"`
+	CreatedOn time.Time `json:"createdOn"`
+	CreatedBy string    `json:"createdBy"`
 	// DownloadURL is nil for a CSM-native (Postgres) data source attachment:
 	// this service holds no download location for it, only its storage_key --
 	// resolving storage_key to an actual download location is the downstream
@@ -4506,19 +4506,25 @@ type CaseFeedback struct {
 // metadata plus its base64-encoded file content. Note ServiceNow's
 // attachment-details lookup does not resolve the uploader to a UserReference
 // the way the search/comment paths do (only those two carry a createdByUser
-// object) — CreatedBy is a bare string here, and there is no ReferenceType in
-// the upstream response at all, so it is deliberately not modeled below.
+// object) — CreatedBy is a bare string here.
 type AttachmentDetails struct {
-	ID          string    `json:"id"`
-	ReferenceID string    `json:"referenceId"`
-	Name        string    `json:"name"`
-	Type        string    `json:"type"`
-	SizeBytes   int       `json:"sizeBytes"`
-	Description *string   `json:"description"`
-	CreatedBy   string    `json:"createdBy"`
-	CreatedOn   time.Time `json:"createdOn"`
-	DownloadURL *string   `json:"downloadUrl"`
-	PreviewURL  *string   `json:"previewUrl"`
+	ID          string `json:"id"`
+	ReferenceID string `json:"referenceId"`
+	// ReferenceType identifies which entity type ReferenceID points at (see
+	// ReferenceType). Always populated for CSM-native (Postgres) data source
+	// attachments; nil (JSON null) when the backing data source's
+	// attachment-details lookup does not report a reference type. Callers
+	// authorizing access per referenced resource must treat a nil value as
+	// unknown and fail closed.
+	ReferenceType *ReferenceType `json:"referenceType"`
+	Name          string        `json:"name"`
+	Type          string        `json:"type"`
+	SizeBytes     int           `json:"sizeBytes"`
+	Description   *string       `json:"description"`
+	CreatedBy     string        `json:"createdBy"`
+	CreatedOn     time.Time     `json:"createdOn"`
+	DownloadURL   *string       `json:"downloadUrl"`
+	PreviewURL    *string       `json:"previewUrl"`
 	// Content is nil for CSM-native (Postgres) data source attachments: this
 	// service holds no bytes for them -- see CaseService.GetCaseAttachmentContent.
 	// Always non-nil for ServiceNow-sourced attachments.

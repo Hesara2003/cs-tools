@@ -12098,7 +12098,7 @@ components:
         as a base64 data URI. For a CSM-native (Postgres) data source attachment, content is
         always "" and storageKey is populated instead: this service holds no bytes for that
         data source, so content must be resolved externally via storageKey.
-      required: [id, referenceId, name, type, sizeBytes, createdBy, createdOn, content]
+      required: [id, referenceId, referenceType, name, type, sizeBytes, createdBy, createdOn, content]
       properties:
         id:
           type: string
@@ -12106,6 +12106,21 @@ components:
         referenceId:
           type: string
           format: uuid
+        referenceType:
+          type: string
+          nullable: true
+          enum:
+            - case
+            - conversation
+            - change_request
+            - deployment
+            - incident
+          description: >
+            The entity type referenceId points at. Always populated for CSM-native
+            (Postgres) data source attachments; null when the backing data source's
+            attachment-details lookup does not report a reference type. Callers
+            authorizing access per referenced resource must treat a null value as
+            unknown and fail closed.
         name:
           type: string
         type:
