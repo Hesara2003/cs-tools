@@ -88,15 +88,28 @@ func NewClient(cfg Config) *Client {
 }
 
 // refuseInsecureRedirect is an http.Client.CheckRedirect override that
-// refuses to follow any redirect whose target is not HTTPS. Go's default
+// refuses to follow any redirect whose target is not HTTPS or whose origin
+// (scheme://host) differs from the ORIGINAL request's origin. Go's default
 // CheckRedirect copies the Authorization header onto a same-host redirect,
 // which would silently leak this client's bearer token (see MintToken,
-// CreateShare) over cleartext on an HTTPS-to-HTTP downgrade redirect —
-// something a compromised or misconfigured SFTPGo instance, or a
-// man-in-the-middle, could trigger without this check.
+// CreateShare) over cleartext on an HTTPS-to-HTTP downgrade redirect; and a
+// 307/308 redirect to a different HTTPS origin would forward whatever the
+// request carries — for UploadBytes's TUS calls that is the share-id
+// credential in Upload-Metadata plus the PATCH body's uploaded bytes — to a
+// host this client was never configured to trust. Either is something a
+// compromised or misconfigured SFTPGo instance, or a man-in-the-middle,
+// could trigger without this check. The origin comparison is against
+// via[0].URL (the request this client originally issued), not the previous
+// hop, so a chain of redirects cannot walk the request off-origin.
 func refuseInsecureRedirect(req *http.Request, via []*http.Request) error {
 	if req.URL.Scheme != "https" {
 		return fmt.Errorf("sftpgo: refusing to follow redirect to non-https URL %q", req.URL.Redacted())
+	}
+	if len(via) > 0 {
+		origin := via[0].URL
+		if req.URL.Scheme != origin.Scheme || req.URL.Host != origin.Host {
+			return fmt.Errorf("sftpgo: refusing to follow redirect to foreign origin %q (original origin %s://%s)", req.URL.Redacted(), origin.Scheme, origin.Host)
+		}
 	}
 	return nil
 }
@@ -116,12 +129,19 @@ func (c *Client) do(req *http.Request, opDesc string) ([]byte, http.Header, erro
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		// Read at most one byte past the truncation limit — enough for
+		// truncate to keep its excerpt — so an arbitrarily large upstream
+		// error body is never buffered in full.
+		errBody, err := io.ReadAll(io.LimitReader(resp.Body, maxErrBodyBytes+1))
+		if err != nil {
+			return nil, nil, fmt.Errorf("sftpgo: read %s response: %w", opDesc, err)
+		}
+		return nil, nil, &apierror.Error{StatusCode: resp.StatusCode, Body: truncate(errBody)}
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, nil, fmt.Errorf("sftpgo: read %s response: %w", opDesc, err)
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, nil, &apierror.Error{StatusCode: resp.StatusCode, Body: truncate(body)}
 	}
 	return body, resp.Header, nil
 }

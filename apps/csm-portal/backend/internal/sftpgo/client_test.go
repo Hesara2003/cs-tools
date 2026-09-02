@@ -375,6 +375,157 @@ func TestClientRefusesInsecureRedirect(t *testing.T) {
 	}
 }
 
+// TestClientRefusesCrossOriginRedirectOnTUSCreate proves a TUS create (POST
+// /api/v2/shares-chunked-uploads) redirected to a DIFFERENT HTTPS origin is
+// refused before the foreign host is ever dialed — a 307/308 there would
+// forward the Upload-Metadata header, whose share_id is the entire upload
+// credential, to a host this client was never configured to trust.
+func TestClientRefusesCrossOriginRedirectOnTUSCreate(t *testing.T) {
+	t.Parallel()
+
+	foreignHit := false
+	foreignSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		foreignHit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer foreignSrv.Close()
+
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// HTTPS-to-HTTPS, but a different origin: the scenario the
+		// same-origin check in refuseInsecureRedirect exists to block.
+		http.Redirect(w, r, foreignSrv.URL+"/api/v2/shares-chunked-uploads", http.StatusTemporaryRedirect)
+	}))
+	defer tlsSrv.Close()
+
+	client := NewClient(Config{BaseURL: tlsSrv.URL})
+	client.http.Transport = tlsSrv.Client().Transport
+
+	err := client.UploadBytes(context.Background(), "share-abc", "/attachments/x/img.png", []byte("payload"), "image/png")
+	if err == nil {
+		t.Fatal("UploadBytes: expected an error refusing the cross-origin redirect, got nil")
+	}
+	if !strings.Contains(err.Error(), "refusing to follow redirect to foreign origin") {
+		t.Errorf("UploadBytes error = %v, want it to mention refusing the foreign-origin redirect", err)
+	}
+	if foreignHit {
+		t.Error("foreign origin received a request; CheckRedirect should have refused before dialing it (Upload-Metadata's share_id would have leaked)")
+	}
+}
+
+// TestClientRefusesCrossOriginRedirectOnTUSPatch is the PATCH-leg twin of the
+// create-leg test above: the create succeeds on the configured origin, then
+// the PATCH carrying the file bytes is redirected to a different HTTPS origin
+// and must be refused before that host sees the body.
+func TestClientRefusesCrossOriginRedirectOnTUSPatch(t *testing.T) {
+	t.Parallel()
+
+	foreignHit := false
+	foreignSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		foreignHit = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer foreignSrv.Close()
+
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			w.Header().Set("Location", "/api/v2/shares-chunked-uploads/upload-1")
+			w.WriteHeader(http.StatusCreated)
+		case http.MethodPatch:
+			http.Redirect(w, r, foreignSrv.URL+"/api/v2/shares-chunked-uploads/upload-1", http.StatusTemporaryRedirect)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer tlsSrv.Close()
+
+	client := NewClient(Config{BaseURL: tlsSrv.URL})
+	client.http.Transport = tlsSrv.Client().Transport
+
+	err := client.UploadBytes(context.Background(), "share-abc", "/attachments/x/img.png", []byte("payload"), "image/png")
+	if err == nil {
+		t.Fatal("UploadBytes: expected an error refusing the cross-origin redirect, got nil")
+	}
+	if !strings.Contains(err.Error(), "refusing to follow redirect to foreign origin") {
+		t.Errorf("UploadBytes error = %v, want it to mention refusing the foreign-origin redirect", err)
+	}
+	if foreignHit {
+		t.Error("foreign origin received a request; CheckRedirect should have refused before dialing it (the PATCH body's bytes would have leaked)")
+	}
+}
+
+// TestClientFollowsSameOriginRedirect proves the same-origin check does not
+// over-block: an HTTPS redirect to a different path on the SAME origin is
+// still followed, on both the TUS create and PATCH legs.
+func TestClientFollowsSameOriginRedirect(t *testing.T) {
+	t.Parallel()
+
+	var patchLanded bool
+	var mux http.ServeMux
+	mux.HandleFunc("POST /api/v2/shares-chunked-uploads", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/relocated-create", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("POST /relocated-create", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "/api/v2/shares-chunked-uploads/upload-1")
+		w.WriteHeader(http.StatusCreated)
+	})
+	mux.HandleFunc("PATCH /api/v2/shares-chunked-uploads/upload-1", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/relocated-patch", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("PATCH /relocated-patch", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != "payload" {
+			t.Errorf("redirected PATCH body = %q, want %q", body, "payload")
+		}
+		patchLanded = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+	tlsSrv := httptest.NewTLSServer(&mux)
+	defer tlsSrv.Close()
+
+	client := NewClient(Config{BaseURL: tlsSrv.URL})
+	client.http.Transport = tlsSrv.Client().Transport
+
+	if err := client.UploadBytes(context.Background(), "share-abc", "/attachments/x/img.png", []byte("payload"), "image/png"); err != nil {
+		t.Fatalf("UploadBytes: %v (a same-origin redirect must still be followed)", err)
+	}
+	if !patchLanded {
+		t.Error("redirected PATCH target was never reached")
+	}
+}
+
+// TestDoTruncatesHugeErrorBody proves a non-2xx response with an arbitrarily
+// large body surfaces as an *apierror.Error whose Body excerpt is bounded at
+// maxErrBodyBytes — the client reads only just past the limit rather than
+// buffering the whole thing.
+func TestDoTruncatesHugeErrorBody(t *testing.T) {
+	t.Parallel()
+
+	huge := strings.Repeat("x", 1<<20) // 1 MiB, far past maxErrBodyBytes
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, huge)
+	}))
+	defer srv.Close()
+
+	client := NewClient(Config{BaseURL: srv.URL})
+
+	_, err := client.MintToken(context.Background(), "jane.doe@example.com", "raw-jwt")
+	var apiErr *apierror.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %v, want *apierror.Error", err)
+	}
+	if apiErr.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode = %d, want 500", apiErr.StatusCode)
+	}
+	if len(apiErr.Body) != maxErrBodyBytes {
+		t.Errorf("len(Body) = %d, want exactly %d (truncated)", len(apiErr.Body), maxErrBodyBytes)
+	}
+	if apiErr.Body != huge[:maxErrBodyBytes] {
+		t.Errorf("Body = %q, want the first %d bytes of the upstream body", apiErr.Body, maxErrBodyBytes)
+	}
+}
+
 func TestRemoveFileSendsCorrectRequestShape(t *testing.T) {
 	t.Parallel()
 
