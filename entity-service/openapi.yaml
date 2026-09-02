@@ -12098,7 +12098,7 @@ components:
         as a base64 data URI. For a CSM-native (Postgres) data source attachment, content is
         always "" and storageKey is populated instead: this service holds no bytes for that
         data source, so content must be resolved externally via storageKey.
-      required: [id, referenceId, name, type, sizeBytes, createdBy, createdOn, content]
+      required: [id, referenceId, referenceType, name, type, sizeBytes, createdBy, createdOn, content]
       properties:
         id:
           type: string
