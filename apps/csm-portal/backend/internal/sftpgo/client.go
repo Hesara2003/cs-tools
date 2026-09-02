@@ -101,6 +101,31 @@ func refuseInsecureRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
+// do executes req and returns the full response body plus the response
+// headers — the shared request/response path every Client method routes
+// through, mirroring the do helpers on this backend's other upstream clients
+// (internal/entity, internal/scim, internal/updates). A transport failure or
+// body-read failure is wrapped with opDesc; any non-2xx status is mapped to
+// an *apierror.Error carrying a truncated body excerpt. The headers are
+// returned because some SFTPGo responses carry their result there rather
+// than in the body (CreateShare's X-Object-Id, UploadBytes's TUS Location).
+func (c *Client) do(req *http.Request, opDesc string) ([]byte, http.Header, error) {
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sftpgo: %s request: %w", opDesc, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sftpgo: read %s response: %w", opDesc, err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, nil, &apierror.Error{StatusCode: resp.StatusCode, Body: truncate(body)}
+	}
+	return body, resp.Header, nil
+}
+
 // BaseURL returns the configured REST API base URL, verbatim — handed back
 // to the FE by AttachmentStorageHandler.MintUploadToken as the host it
 // should call directly for the upload itself.
@@ -133,18 +158,9 @@ func (c *Client) MintToken(ctx context.Context, email, jwtAssertion string) (*To
 	}
 	req.SetBasicAuth(email, jwtAssertion)
 
-	resp, err := c.http.Do(req)
+	body, _, err := c.do(req, "token")
 	if err != nil {
-		return nil, fmt.Errorf("sftpgo: token request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("sftpgo: read token response: %w", err)
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: truncate(body)}
+		return nil, err
 	}
 
 	var tok Token
@@ -214,18 +230,9 @@ func (c *Client) CreateShare(ctx context.Context, accessToken, storageKey string
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	resp, err := c.http.Do(req)
+	body, header, err := c.do(req, "share")
 	if err != nil {
-		return "", fmt.Errorf("sftpgo: share request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("sftpgo: read share response: %w", err)
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", &apierror.Error{StatusCode: resp.StatusCode, Body: truncate(body)}
+		return "", err
 	}
 
 	// SFTPGo has historically returned the created object's id via the
@@ -233,7 +240,7 @@ func (c *Client) CreateShare(ctx context.Context, accessToken, storageKey string
 	// empirically against a real instance in a prior session. The JSON body
 	// is only a fallback here and has NOT been independently re-verified for
 	// this change.
-	if id := resp.Header.Get("X-Object-Id"); id != "" {
+	if id := header.Get("X-Object-Id"); id != "" {
 		return id, nil
 	}
 
@@ -312,17 +319,9 @@ func (c *Client) UploadBytes(ctx context.Context, shareID, storageKey string, da
 	createReq.Header.Set("Upload-Length", strconv.Itoa(len(data)))
 	createReq.Header.Set("Upload-Metadata", uploadMetadata)
 
-	createResp, err := c.http.Do(createReq)
+	_, createHeader, err := c.do(createReq, "chunked-upload create")
 	if err != nil {
-		return fmt.Errorf("sftpgo: chunked-upload create request: %w", err)
-	}
-	createBody, err := io.ReadAll(createResp.Body)
-	createResp.Body.Close()
-	if err != nil {
-		return fmt.Errorf("sftpgo: read chunked-upload create response: %w", err)
-	}
-	if createResp.StatusCode < http.StatusOK || createResp.StatusCode >= http.StatusMultipleChoices {
-		return &apierror.Error{StatusCode: createResp.StatusCode, Body: truncate(createBody)}
+		return err
 	}
 
 	// The TUS spec returns the upload's URL via Location, which may be
@@ -332,7 +331,7 @@ func (c *Client) UploadBytes(ctx context.Context, shareID, storageKey string, da
 	// SFTPGo instance redirecting the upload elsewhere is exactly the risk
 	// the frontend's uploadFileViaTus guards against with the same check).
 	uploadURL := createEndpoint
-	if location := createResp.Header.Get("Location"); location != "" {
+	if location := createHeader.Get("Location"); location != "" {
 		base, err := url.Parse(createEndpoint)
 		if err != nil {
 			return fmt.Errorf("sftpgo: parse chunked-upload create endpoint: %w", err)
@@ -357,17 +356,8 @@ func (c *Client) UploadBytes(ctx context.Context, shareID, storageKey string, da
 	patchReq.Header.Set("Content-Type", "application/offset+octet-stream")
 	patchReq.ContentLength = int64(len(data))
 
-	patchResp, err := c.http.Do(patchReq)
-	if err != nil {
-		return fmt.Errorf("sftpgo: chunked-upload PATCH request: %w", err)
-	}
-	patchBody, err := io.ReadAll(patchResp.Body)
-	patchResp.Body.Close()
-	if err != nil {
-		return fmt.Errorf("sftpgo: read chunked-upload PATCH response: %w", err)
-	}
-	if patchResp.StatusCode < http.StatusOK || patchResp.StatusCode >= http.StatusMultipleChoices {
-		return &apierror.Error{StatusCode: patchResp.StatusCode, Body: truncate(patchBody)}
+	if _, _, err := c.do(patchReq, "chunked-upload PATCH"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -391,18 +381,8 @@ func (c *Client) RemoveFile(ctx context.Context, accessToken, storageKey string)
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("sftpgo: file-delete request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("sftpgo: read file-delete response: %w", err)
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return &apierror.Error{StatusCode: resp.StatusCode, Body: truncate(body)}
+	if _, _, err := c.do(req, "file-delete"); err != nil {
+		return err
 	}
 	return nil
 }
