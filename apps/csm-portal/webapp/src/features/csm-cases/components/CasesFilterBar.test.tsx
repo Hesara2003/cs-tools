@@ -396,6 +396,117 @@ describe("CasesFilterBar — Tags is Advanced-only", () => {
   });
 });
 
+// Regression: "Quick filters" used to be disabled outright whenever the
+// active filter had anything Advanced-only in it (e.g. tags), with no way to
+// even look at the Quick filters grid without first clearing that filter by
+// hand. It's clickable unconditionally now — clicking it while not
+// Simple-representable clears the active filter (Quick filters must never
+// silently keep something active it can't display) but stashes the previous
+// value locally so an accidental click doesn't lose real filter criteria:
+// clicking straight back to Advanced restores it, as long as nothing was
+// changed in Quick filters in between.
+describe("CasesFilterBar — switching to Quick filters from an Advanced-only filter", () => {
+  it("is not disabled, and clears the active filter (preserving search) when clicked", () => {
+    const { onChange } = renderBar({
+      ...DEFAULT_CASES_FILTERS,
+      tags: ["micro-gw"],
+      search: "printer",
+    });
+
+    const quickFiltersButton = screen.getByRole("button", { name: "Quick filters" });
+    expect(quickFiltersButton).not.toBeDisabled();
+
+    fireEvent.click(quickFiltersButton);
+
+    expect(onChange).toHaveBeenCalledWith({ ...DEFAULT_CASES_FILTERS, search: "printer" });
+  });
+
+  it("restores the stashed Advanced filter when Advanced is clicked right back, without needing another edit", () => {
+    const original = { ...DEFAULT_CASES_FILTERS, tags: ["micro-gw"] };
+    const { onChange, rerenderWith } = renderBar(original);
+
+    fireEvent.click(screen.getByRole("button", { name: "Quick filters" }));
+    const cleared = onChange.mock.calls[0][0] as CasesFilters;
+    rerenderWith(cleared);
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(onChange).toHaveBeenLastCalledWith(original);
+  });
+
+  it("does not restore the stash once a real edit is made in Quick filters — the fresh edit wins", () => {
+    const original = { ...DEFAULT_CASES_FILTERS, tags: ["micro-gw"] };
+    const { onChange, rerenderWith } = renderBar(original);
+
+    fireEvent.click(screen.getByRole("button", { name: "Quick filters" }));
+    const cleared = onChange.mock.calls[0][0] as CasesFilters;
+    rerenderWith(cleared);
+
+    // A real edit in Quick filters — e.g. picking a severity. It's a
+    // multi-select, so choosing an option doesn't auto-close the menu;
+    // close it explicitly (MUI's Modal makes the rest of the page
+    // aria-hidden while open, hiding the mode-toggle buttons from
+    // getByRole until it does).
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Severity" }));
+    fireEvent.click(screen.getByRole("option", { name: "S0" }));
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
+    const edited = onChange.mock.calls[1][0] as CasesFilters;
+    expect(edited.tags).toEqual([]); // still not the stashed tags filter
+    rerenderWith(edited);
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    // The stash was dropped by the edit above — Advanced just shows the
+    // caller's current (edited) filters, not a resurrected old tags filter.
+    expect(onChange).not.toHaveBeenCalledWith(original);
+  });
+
+  // CodeRabbit catch on the PR that introduced the stash: applyView and the
+  // reset button both replace `filters` via a path that bypasses
+  // `handleSimpleFieldChange` (a saved view calls `onChange` directly; reset
+  // calls the `onReset` prop) — neither used to clear a pending stash, so
+  // clicking Advanced right after either one could resurrect the
+  // pre-Quick-filters criteria over what the user just deliberately applied
+  // or cleared.
+  it("applying a saved view drops the stash — Advanced afterward shows the view, not resurrected tags", () => {
+    localStorage.clear();
+    localStorage.setItem(
+      "csm.savedFilters.v1",
+      JSON.stringify([{ name: "First", qs: "states=open" }]),
+    );
+    const original = { ...DEFAULT_CASES_FILTERS, tags: ["micro-gw"] };
+    const { onChange, rerenderWith } = renderBar(original);
+
+    fireEvent.click(screen.getByRole("button", { name: "Quick filters" }));
+    rerenderWith(onChange.mock.calls[0][0] as CasesFilters);
+
+    fireEvent.click(screen.getByRole("button", { name: /Saved views/ }));
+    fireEvent.click(screen.getByText("First"));
+    const viewApplied = onChange.mock.calls[1][0] as CasesFilters;
+    expect(viewApplied.states).toEqual(["open"]);
+    rerenderWith(viewApplied);
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(onChange).not.toHaveBeenCalledWith(original);
+  });
+
+  it("resetting drops the stash — Advanced afterward does not resurrect the cleared tags filter", () => {
+    // search stays active (and preserved) through the Quick-filters switch,
+    // so "Clear filters" is still the button shown — this is the realistic
+    // way to reach a reset with a stash still pending, since any actual
+    // edit in the Quick filters grid itself already drops the stash on its
+    // own (the case above).
+    const original = { ...DEFAULT_CASES_FILTERS, tags: ["micro-gw"], search: "printer" };
+    const { onChange, rerenderWith } = renderBar(original);
+
+    fireEvent.click(screen.getByRole("button", { name: "Quick filters" }));
+    rerenderWith(onChange.mock.calls[0][0] as CasesFilters);
+
+    fireEvent.click(screen.getByRole("button", { name: /Clear filters/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(onChange).not.toHaveBeenCalledWith(original);
+  });
+});
+
 // Regression: reported live — with every control the same width, a project
 // name of any real length ellipsized almost immediately, and the control sat
 // mid-row rather than having room to grow. Moved to the end of the grid and

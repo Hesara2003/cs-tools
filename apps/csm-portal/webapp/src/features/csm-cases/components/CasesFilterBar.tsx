@@ -47,13 +47,14 @@ import {
   Trash2,
   X,
 } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, useState, type JSX } from "react";
+import { useCallback, useMemo, useState, type JSX } from "react";
 import type {
   CaseState,
   Severity,
 } from "@features/csm-dashboard/types/abtDashboard";
 import {
   countActiveFilters,
+  DEFAULT_CASES_FILTERS,
   readCasesFiltersFromUrl,
   writeCasesFiltersToUrl,
 } from "@features/csm-cases/utils/casesFiltersUrl";
@@ -534,6 +535,51 @@ export default function CasesFilterBar({
   // Advanced-authoring case.
   const effectiveMode = mode === "simple" && !canShowSimple ? "advanced" : mode;
 
+  // Holds the Advanced-only filter state a "Quick filters" click had to move
+  // out of the way (see handleSwitchToSimple below) so it can be restored if
+  // the user comes right back to Advanced without having changed anything in
+  // Quick filters meanwhile — protects against a stray/accidental click
+  // losing real filter criteria, without reintroducing the "Simple mode
+  // silently still filtering by something it can't display" bug the
+  // disabled-button guard above was originally written to prevent.
+  const [stashedAdvancedFilters, setStashedAdvancedFilters] =
+    useState<CasesFilters | null>(null);
+
+  // Every Quick-filters-grid field routes its edits through this instead of
+  // `onChange` directly, so making a real edit while a stash is pending
+  // drops it — restoring stale Advanced criteria over a filter the user just
+  // deliberately changed would be its own kind of surprising data loss.
+  const handleSimpleFieldChange = useCallback(
+    (next: CasesFilters) => {
+      if (stashedAdvancedFilters) setStashedAdvancedFilters(null);
+      onChange(next);
+    },
+    [onChange, stashedAdvancedFilters],
+  );
+
+  const handleSwitchToSimple = (): void => {
+    if (!canShowSimple) {
+      // Preserve search text (not part of what Simple/Advanced toggles)
+      // while resetting every actual filter field to empty — Quick filters
+      // must never silently keep an Advanced-only criterion applied behind
+      // a grid that can't show it.
+      setStashedAdvancedFilters(filters);
+      onChange({ ...DEFAULT_CASES_FILTERS, search: filters.search });
+    }
+    setMode("simple");
+  };
+
+  const handleSwitchToAdvanced = (): void => {
+    if (stashedAdvancedFilters) {
+      // Preserve whatever search text is current, not the stash's own
+      // (possibly now-stale) copy — search stays live across both modes, so
+      // it can have changed while the stash sat unused.
+      onChange({ ...stashedAdvancedFilters, search: filters.search });
+      setStashedAdvancedFilters(null);
+    }
+    setMode("advanced");
+  };
+
   const unifiedRows: UnifiedFilterRow[] = useMemo(
     () => filtersToAdvancedRows(filters),
     [filters],
@@ -628,7 +674,18 @@ export default function CasesFilterBar({
 
   const applyView = (qs: string): void => {
     setSavedAnchor(null);
+    // A pending stash is about to be replaced wholesale by this saved view —
+    // if left in place, clicking Advanced afterward would resurrect the
+    // pre-Quick-filters criteria instead of the view the user just applied.
+    setStashedAdvancedFilters(null);
     onChange(readCasesFiltersFromUrl(new URLSearchParams(qs)));
+  };
+
+  // Same reasoning as applyView above: a reset must not be silently undoable
+  // via a later "Advanced" click restoring what was just cleared.
+  const handleReset = (): void => {
+    setStashedAdvancedFilters(null);
+    onReset();
   };
 
   const handleSaveView = (): void => {
@@ -801,7 +858,7 @@ export default function CasesFilterBar({
         <Button
           variant="outlined"
           size="small"
-          onClick={hasActive ? onReset : onFiltersToggle}
+          onClick={hasActive ? handleReset : onFiltersToggle}
           startIcon={hasActive ? <X size={16} /> : <ListFilter size={16} />}
           endIcon={
             !hasActive &&
@@ -887,8 +944,8 @@ export default function CasesFilterBar({
               title={
                 canShowSimple
                   ? ""
-                  : "This filter can't be shown as Simple — one or more of the active filters " +
-                    "is only representable in Advanced mode. Clear those to switch back."
+                  : "One or more active filters is only representable in Advanced mode — " +
+                    "switching to Quick filters clears them (Advanced remembers them until you change anything here)."
               }
             >
               <span>
@@ -897,11 +954,10 @@ export default function CasesFilterBar({
                   variant={effectiveMode === "simple" ? "contained" : "outlined"}
                   color={effectiveMode === "simple" ? "primary" : "inherit"}
                   aria-pressed={effectiveMode === "simple"}
-                  disabled={!canShowSimple}
-                  onClick={() => setMode("simple")}
+                  onClick={handleSwitchToSimple}
                   sx={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
                 >
-                  Simple
+                  Quick filters
                 </Button>
               </span>
             </Tooltip>
@@ -910,7 +966,7 @@ export default function CasesFilterBar({
               variant={effectiveMode === "advanced" ? "contained" : "outlined"}
               color={effectiveMode === "advanced" ? "primary" : "inherit"}
               aria-pressed={effectiveMode === "advanced"}
-              onClick={() => setMode("advanced")}
+              onClick={handleSwitchToAdvanced}
               sx={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, ml: "-1px" }}
             >
               Advanced
@@ -925,7 +981,7 @@ export default function CasesFilterBar({
                   label="Severity"
                   values={filters.severities}
                   options={severityOptions}
-                  onChange={(next) => onChange({ ...filters, severities: next })}
+                  onChange={(next) => handleSimpleFieldChange({ ...filters, severities: next })}
                 />
               </Grid>
             )}
@@ -948,7 +1004,7 @@ export default function CasesFilterBar({
                 // server-side, so drop any selected work states as soon as
                 // the selection stops being exactly that one included state.
                 onChange={(next) =>
-                  onChange({
+                  handleSimpleFieldChange({
                     ...filters,
                     states: next.included,
                     excludeStates: next.excluded,
@@ -977,7 +1033,7 @@ export default function CasesFilterBar({
                   label="CRE Team"
                   values={filters.csTeams}
                   options={teamOptions}
-                  onChange={(next) => onChange({ ...filters, csTeams: next })}
+                  onChange={(next) => handleSimpleFieldChange({ ...filters, csTeams: next })}
                 />
               </Grid>
             )}
@@ -988,7 +1044,7 @@ export default function CasesFilterBar({
                   label="Engagement type"
                   values={filters.engagementTypes}
                   options={engagementTypeOptions}
-                  onChange={(next) => onChange({ ...filters, engagementTypes: next })}
+                  onChange={(next) => handleSimpleFieldChange({ ...filters, engagementTypes: next })}
                 />
               </Grid>
             )}
@@ -999,7 +1055,7 @@ export default function CasesFilterBar({
                   label={typeFilterLabel}
                   values={filters.caseTypes}
                   options={caseTypeOptions}
-                  onChange={(next) => onChange({ ...filters, caseTypes: next })}
+                  onChange={(next) => handleSimpleFieldChange({ ...filters, caseTypes: next })}
                 />
               </Grid>
             )}
@@ -1010,7 +1066,7 @@ export default function CasesFilterBar({
                   `/users/search`). Searches the directory as you type. */}
               <AsyncAssigneeMultiSelect
                 values={filters.assignees}
-                onChange={(next) => onChange({ ...filters, assignees: next })}
+                onChange={(next) => handleSimpleFieldChange({ ...filters, assignees: next })}
                 nameSeed={assigneeNameSeed}
               />
             </Grid>
@@ -1019,7 +1075,7 @@ export default function CasesFilterBar({
                   `productNames` (SN matches product.name, all versions). */}
               <ProductNameMultiSelect
                 values={filters.productNames}
-                onChange={(next) => onChange({ ...filters, productNames: next })}
+                onChange={(next) => handleSimpleFieldChange({ ...filters, productNames: next })}
               />
             </Grid>
             {!hideOnboardingStatusFilter && (
@@ -1029,7 +1085,7 @@ export default function CasesFilterBar({
                   label="Onboarding status"
                   values={filters.onboardingStatuses}
                   options={ONBOARDING_STATUS_OPTIONS}
-                  onChange={(next) => onChange({ ...filters, onboardingStatuses: next })}
+                  onChange={(next) => handleSimpleFieldChange({ ...filters, onboardingStatuses: next })}
                 />
               </Grid>
             )}
@@ -1045,7 +1101,7 @@ export default function CasesFilterBar({
               <Grid size={{ xs: 12, sm: 12, md: 6, lg: 4 }}>
                 <AsyncProjectMultiSelect
                   values={filters.projects}
-                  onChange={(next) => onChange({ ...filters, projects: next })}
+                  onChange={(next) => handleSimpleFieldChange({ ...filters, projects: next })}
                   nameSeed={projectNameSeed}
                 />
               </Grid>

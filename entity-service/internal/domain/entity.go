@@ -3285,6 +3285,37 @@ type SearchProductVulnerabilitiesResponse struct {
 	Offset                 int                        `json:"offset"`
 }
 
+// ProductVulnerabilitySyncItem is one entry submitted to a full-replace sync of product
+// vulnerabilities. WSO2ID is the join key the downstream data source uses to match this item
+// against an existing record.
+type ProductVulnerabilitySyncItem struct {
+	WSO2ID                 string `json:"wso2Id"`
+	ComponentName          string `json:"componentName"`
+	ApprovedBySecurityTeam bool   `json:"approvedBySecurityTeam"`
+	ComponentType          string `json:"componentType"`
+	ComponentVersion       string `json:"componentVersion"`
+	CVE                    string `json:"cve"`
+	Justification          string `json:"justification"`
+	ProductName            string `json:"productName"`
+	ProductVersion         string `json:"productVersion"`
+	Resolution             string `json:"resolution"`
+	ScannerName            string `json:"scannerName"`
+	Severity               any    `json:"severity"`
+	UpdateLevel            string `json:"updateLevel"`
+	UseCase                string `json:"useCase"`
+	VulnerabilityID        string `json:"vulnerabilityId"`
+	WSO2Resolution         string `json:"wso2Resolution"`
+}
+
+// ProductVulnerabilitySyncResult reports the outcome of a full-replace product vulnerability
+// sync. Fields are pointers because the downstream data source may omit or partially populate
+// them; a nil field means the count was not reported, not that it was zero.
+type ProductVulnerabilitySyncResult struct {
+	InsertedRecords *int `json:"insertedRecords,omitempty"`
+	UpdatedRecords  *int `json:"updatedRecords,omitempty"`
+	DeletedRecords  *int `json:"deletedRecords,omitempty"`
+}
+
 // CallRequestStateType is the state of a call request as a domain string enum.
 type CallRequestStateType string
 

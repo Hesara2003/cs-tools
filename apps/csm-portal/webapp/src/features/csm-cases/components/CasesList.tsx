@@ -468,8 +468,18 @@ export default function CasesList({
                         </Typography>
                       )}
                     </Box>
-                    {/* Subject (the widest column) + project for context. */}
-                    <Box sx={{ minWidth: 0 }}>
+                    {/* Subject (the widest column) + project for context.
+                        `maxWidth` here (not just `noWrap`'s ellipsis, which
+                        only clips paint — it doesn't affect intrinsic sizing)
+                        is what keeps one long subject line from blowing up
+                        this column's width, and via the grid's own
+                        `minWidth: "max-content"` above, the whole grid's: a
+                        grid item's max-content *contribution* to track sizing
+                        is clamped by its own specified max-width, so without
+                        one here a single unusually long subject forced this
+                        default, always-visible column to scroll horizontally
+                        even with zero optional columns turned on. */}
+                    <Box sx={{ minWidth: 0, maxWidth: 480 }}>
                       <Typography variant="body2" noWrap title={c.subject}>
                         {c.subject}
                       </Typography>

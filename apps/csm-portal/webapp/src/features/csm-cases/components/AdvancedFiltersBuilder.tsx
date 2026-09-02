@@ -131,10 +131,20 @@ function DateOrPresetValueInput({
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
       <FormControl size="small" fullWidth>
-        <InputLabel id={labelId}>Date</InputLabel>
+        {/* `displayEmpty` always renders *something* in the value area (the
+            "Choose…" placeholder item when nothing's picked yet) — MUI's
+            default shrink-on-value logic treats an empty value as "nothing
+            to shrink for" though, so the floating label sits in its
+            unshrunk, centered position right on top of that placeholder
+            text. Force it shrunk always, same fix as MultiSelectField's own
+            `displayEmpty`-style empty state. */}
+        <InputLabel id={labelId} shrink>
+          Date
+        </InputLabel>
         <Select
           labelId={labelId}
           label="Date"
+          notched
           value={mode === "custom" ? CUSTOM_DATE_SENTINEL : value}
           displayEmpty
           onChange={(e) => {
@@ -148,9 +158,7 @@ function DateOrPresetValueInput({
             }
           }}
         >
-          <MenuItem value="">
-            <em>Choose…</em>
-          </MenuItem>
+          <MenuItem value="">Choose…</MenuItem>
           {RELATIVE_DATE_PRESETS.map((p) => (
             <MenuItem key={p.value} value={p.value}>
               {p.label}
@@ -226,7 +234,7 @@ export default function AdvancedFiltersBuilder({
   projectNameSeed,
 }: AdvancedFiltersBuilderProps): JSX.Element {
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <Typography variant="subtitle2" color="text.secondary">
         Advanced filters
       </Typography>
@@ -284,7 +292,7 @@ export default function AdvancedFiltersBuilder({
               </Select>
             </FormControl>
 
-            <Box sx={{ minWidth: 220, flex: "1 1 220px" }}>
+            <Box sx={{ minWidth: 220, maxWidth: 320, flex: "1 1 220px" }}>
               {opMeta?.valueKind === "multiText" && (
                 <TextField
                   size="small"

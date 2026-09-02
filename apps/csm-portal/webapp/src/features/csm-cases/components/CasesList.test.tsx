@@ -109,6 +109,33 @@ describe("CasesList row navigation", () => {
   });
 });
 
+// Regression: reported live — a single case with an unusually long subject
+// line forced the whole grid to scroll horizontally even with zero optional
+// columns turned on. `noWrap`'s ellipsis only clips paint; it never affects a
+// CSS grid item's max-content sizing contribution, which is what actually
+// drove the grid wider. A `maxWidth` on the Subject cell's wrapping Box is
+// what fixes it — this only guards that the style stays in place, since
+// jsdom doesn't perform real CSS Grid intrinsic-size layout.
+describe("CasesList — Subject cell has a capped width", () => {
+  it("does not let the wrapping cell grow unbounded for a long subject", () => {
+    const longSubject =
+      "A very long case subject line that goes on and on and would otherwise force this column, and the whole table, to grow far past a normal viewport width";
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={<CasesList cases={[{ ...CASE, subject: longSubject }]} isLoading={false} />}
+        />
+      </Routes>,
+      ["/cases"],
+    );
+
+    const subjectCell = screen.getByTitle(longSubject).parentElement;
+    expect(subjectCell).not.toBeNull();
+    expect(getComputedStyle(subjectCell!).maxWidth).toBe("480px");
+  });
+});
+
 describe("CasesList quick preview", () => {
   it("opens the preview drawer instead of navigating when the preview action is clicked", () => {
     renderWithProviders(

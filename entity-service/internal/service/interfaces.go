@@ -596,6 +596,12 @@ type ProductVulnerabilityService interface {
 	// GetVulnerabilityMeta returns the valid severity choices for product vulnerabilities.
 	// Supported by the ServiceNow data source only.
 	GetVulnerabilityMeta(ctx context.Context) (domain.VulnerabilityMetaResponse, error)
+	// SyncProductVulnerabilities replaces the full set of product vulnerabilities with the
+	// given items. This is a full-replace sync: ServiceNow deletes any existing record whose
+	// WSO2ID is not present in items and upserts everything that is. Callers MUST submit the
+	// complete current set, never a partial delta, or downstream records will be deleted.
+	// Supported by the ServiceNow data source only.
+	SyncProductVulnerabilities(ctx context.Context, items []domain.ProductVulnerabilitySyncItem) (domain.ProductVulnerabilitySyncResult, error)
 }
 
 // AlertService defines the operations available on alerts.

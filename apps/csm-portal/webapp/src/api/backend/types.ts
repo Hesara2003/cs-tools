@@ -2556,6 +2556,30 @@ export interface BePatchChangeRequestResponse {
   updatedBy?: string;
 }
 
+/**
+ * `field` enum accepted by a change-request search's generic `filters`
+ * array — mirrors the entity-service's `changeRequestFilterFieldSet` (see
+ * `change_request_filters.go`) exactly. This is separate from the
+ * pre-existing named fields below (`states`/`impacts`/`closedOn`/...),
+ * which stay outside this array.
+ */
+export type BeChangeRequestFieldFilterField =
+  | "createdOn"
+  | "assignmentGroupId"
+  | "approval";
+
+/** `op` enum accepted by a change-request search's generic `filters` array
+ * — mirrors `changeRequestFilterOpSet` in `change_request_filters.go`.
+ * Field/op compatibility is enforced only on the backend. */
+export type BeChangeRequestFieldFilterOp = "gte" | "lte" | "in" | "eq";
+
+/** One entry in a change-request search's generic `filters` array. */
+export interface BeChangeRequestFieldFilter {
+  field: BeChangeRequestFieldFilterField;
+  op: BeChangeRequestFieldFilterOp;
+  values?: string[];
+}
+
 export interface BeChangeRequestSearchPayload {
   filters?: {
     projectIds?: string[];
@@ -2570,6 +2594,13 @@ export interface BeChangeRequestSearchPayload {
      * searchQuery scan.
      */
     number?: string;
+    /**
+     * The generic field/op/values filter array (see
+     * {@link BeChangeRequestFieldFilter}) — additive alongside the named
+     * fields above. Only the SRE Team control (`assignmentGroupId`/`"in"`)
+     * populates this today.
+     */
+    filters?: BeChangeRequestFieldFilter[];
   };
   sortBy?: {
     field?: "createdOn" | "updatedOn";
@@ -2799,6 +2830,41 @@ export interface BePatchIncidentResponse {
   incident: BeIncidentDetail;
 }
 
+/**
+ * `field` enum accepted by an incident search's generic `filters` array —
+ * mirrors the entity-service's `incidentFilterFieldSet` (see
+ * `incident_filters.go`) exactly. Deliberately a superset of what this
+ * portal currently builds a control for (only `assignmentGroupId`, for the
+ * SRE Team filter, at present) — narrowing the FE type to just that one
+ * value would create a stale-type problem the moment another field gets a
+ * control.
+ */
+export type BeIncidentFieldFilterField =
+  | "state"
+  | "assignmentGroupId"
+  | "businessServiceId"
+  | "createdOn"
+  | "slaViolated"
+  | "madeSla"
+  | "productName";
+
+/**
+ * `op` enum accepted by an incident search's generic `filters` array,
+ * independent of `field` — mirrors `incidentFilterOpSet` in
+ * `incident_filters.go`. Field/op compatibility is enforced only on the
+ * backend, not narrowed here.
+ */
+export type BeIncidentFieldFilterOp = "in" | "gte" | "lte" | "eq";
+
+/** One entry in an incident search's generic `filters` array — same "field
+ * op values" shape as {@link BeCaseFieldFilter}, scoped to incidents' own
+ * field/op allow-list. */
+export interface BeIncidentFieldFilter {
+  field: BeIncidentFieldFilterField;
+  op: BeIncidentFieldFilterOp;
+  values?: string[];
+}
+
 export interface BeIncidentSearchPayload {
   filters?: {
     searchQuery?: string;
@@ -2829,6 +2895,13 @@ export interface BeIncidentSearchPayload {
      * scan.
      */
     number?: string;
+    /**
+     * The generic field/op/values filter array (see {@link BeIncidentFieldFilter}) —
+     * additive alongside the named fields above, not a replacement for them.
+     * Only the SRE Team control (`assignmentGroupId`/`"in"`) populates this
+     * today.
+     */
+    filters?: BeIncidentFieldFilter[];
   };
   sortBy?: {
     field?: "createdOn" | "updatedOn" | "openedOn";
@@ -2885,6 +2958,26 @@ export interface BeProblemSearchView {
   assignedTo?: BeEntityRef | null;
 }
 
+/**
+ * `field` enum accepted by a problem search's generic `filters` array —
+ * mirrors the entity-service's `problemFilterFieldSet` (see
+ * `problem_filters.go`) exactly. Notably smaller than incidents'/change
+ * requests' own field sets — don't assume parity across resources.
+ */
+export type BeProblemFieldFilterField = "state" | "assignmentGroupId";
+
+/** `op` enum accepted by a problem search's generic `filters` array —
+ * mirrors `problemFilterOpSet` in `problem_filters.go`; today every
+ * supported field only accepts `"in"`. */
+export type BeProblemFieldFilterOp = "in";
+
+/** One entry in a problem search's generic `filters` array. */
+export interface BeProblemFieldFilter {
+  field: BeProblemFieldFilterField;
+  op: BeProblemFieldFilterOp;
+  values?: string[];
+}
+
 export interface BeProblemSearchFilters {
   searchQuery?: string;
   /**
@@ -2899,6 +2992,12 @@ export interface BeProblemSearchFilters {
    * a first-class filter rather than through the free-text searchQuery scan.
    */
   number?: string;
+  /**
+   * The generic field/op/values filter array (see {@link BeProblemFieldFilter}) —
+   * additive alongside `states` above. Only the SRE Team control
+   * (`assignmentGroupId`/`"in"`) populates this today.
+   */
+  filters?: BeProblemFieldFilter[];
 }
 
 export interface BeProblemSearchPayload {

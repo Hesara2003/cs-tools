@@ -162,7 +162,7 @@ export default function AnyOfGroupsBuilder({
                       </Select>
                     </FormControl>
 
-                    <Box sx={{ minWidth: 220, flex: "1 1 220px" }}>
+                    <Box sx={{ minWidth: 220, maxWidth: 320, flex: "1 1 220px" }}>
                       {fieldMeta?.valueKind === "multiSelect" && (
                         <MultiSelectField
                           id={`any-of-${branchIndex}-${rowIndex}-value`}
