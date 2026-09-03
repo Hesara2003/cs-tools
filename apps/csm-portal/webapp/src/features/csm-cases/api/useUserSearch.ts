@@ -30,8 +30,15 @@ import {
 /** Page size for the lazy-loaded (scroll-to-load-more) assignee filter. */
 export const USER_PAGE_SIZE = 10;
 
-/** A single directory match: name (label) + email (the filter value). */
+/** A single directory match: name (label), email, and id — different callers
+ * filter on different ones (the assignee/`createdBy` pickers store the
+ * email; an `anyOf` branch's `assignedUserId` row stores the id). `id` is
+ * optional here: `POST /users/search` does not guarantee it on every row, and
+ * an id-less row is still perfectly usable by an email-keyed consumer — only
+ * an id-keyed consumer (`AsyncAssignedUserIdMultiSelect`/
+ * `AsyncUserIdMultiSelect`) needs to additionally filter for it. */
 export interface UserSearchOption {
+  id?: string;
   name: string;
   email: string;
 }
@@ -98,14 +105,17 @@ export function useInfiniteUserSearch(
 
   // Flatten every fetched page, keeping only rows with both a name (the label)
   // and an email (the filter value), de-duplicated by email so paging can't
-  // surface the same person twice.
+  // surface the same person twice. `id` is kept when present but never
+  // required here — `POST /users/search` doesn't guarantee it, and the
+  // email-keyed pickers (assignee/`createdBy`) don't need it at all; only an
+  // id-keyed consumer filters for `id` itself.
   const users = useMemo(() => {
     const seen = new Set<string>();
     const out: UserSearchOption[] = [];
     for (const u of (result.data?.pages ?? []).flatMap((p) => p.users)) {
       if (!u.email || !u.name || seen.has(u.email)) continue;
       seen.add(u.email);
-      out.push({ name: u.name, email: u.email });
+      out.push({ id: u.id, name: u.name, email: u.email });
     }
     return out;
   }, [result.data]);

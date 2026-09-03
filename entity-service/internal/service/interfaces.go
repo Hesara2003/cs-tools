@@ -289,8 +289,9 @@ type DeployedProductService interface {
 	// CreateDeployedProduct creates a new deployed product in ServiceNow.
 	// Supported by the ServiceNow data source only.
 	CreateDeployedProduct(ctx context.Context, req domain.CreateDeployedProductRequest) (domain.CreateDeployedProductResponse, error)
-	// UpdateDeployedProduct updates a deployed product's cores, tps, description, or deactivates it.
-	// Either detail fields or Active=false must be provided, but not both.
+	// UpdateDeployedProduct updates a deployed product's cores, tps, description, update-level
+	// history, or deactivates it. Either detail fields (which now include Updates, a whole-array
+	// replace of the update-level history) or Active=false must be provided, but not both.
 	// Supported by the ServiceNow data source only.
 	UpdateDeployedProduct(ctx context.Context, req domain.UpdateDeployedProductRequest) (domain.UpdateDeployedProductResponse, error)
 	// SearchDeployedProductMetrics returns core-count metrics for the deployed product
@@ -317,11 +318,11 @@ type CaseService interface {
 	// A ValidationError is returned for invalid input; any other error indicates an
 	// infrastructure failure.
 	SearchCases(ctx context.Context, req domain.SearchCasesRequest) (domain.SearchCasesResponse, error)
-	// GroupCasesBy returns server-side aggregated counts of cases per value of
+	// AggregateCases returns server-side aggregated counts of cases per value of
 	// req.GroupBy (e.g. account), capped to the top req.MaxGroups buckets with
-	// the remainder folded into GroupByResponse.OthersCount. A ValidationError
+	// the remainder folded into AggregateResponse.OthersCount. A ValidationError
 	// is returned for invalid input.
-	GroupCasesBy(ctx context.Context, req domain.GroupCasesByRequest) (domain.GroupByResponse, error)
+	AggregateCases(ctx context.Context, req domain.AggregateCasesRequest) (domain.AggregateResponse, error)
 	// CreateCaseComment creates a new comment on the case identified by req.CaseID.
 	// A ValidationError is returned for invalid input or constraint violations.
 	CreateCaseComment(ctx context.Context, req domain.CreateCaseCommentRequest) (domain.CreateCaseCommentResponse, error)
@@ -366,6 +367,11 @@ type CaseService interface {
 	// DeleteCaseAttachment removes the attachment identified by req.AttachmentID from the case.
 	// A NotFoundError is returned if the attachment does not exist.
 	DeleteCaseAttachment(ctx context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error)
+	// UpdateAttachment updates the name and/or description of the attachment identified by
+	// req.AttachmentID, regardless of which reference type it is linked to. At least one of
+	// Name or Description must be provided. A NotFoundError is returned if the attachment
+	// does not exist.
+	UpdateAttachment(ctx context.Context, req domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error)
 	// AddCaseTag attaches a free-text label to the case identified by caseID.
 	// A ValidationError is returned for invalid input (e.g. malformed UUID, empty label).
 	AddCaseTag(ctx context.Context, caseID, label string) (domain.Tag, error)
@@ -380,7 +386,7 @@ type CaseService interface {
 	// GetCaseFeedback returns the feedback previously submitted for the case identified
 	// by id. A NotFoundError is returned if none has been submitted.
 	// Supported by the ServiceNow data source only.
-	GetCaseFeedback(ctx context.Context, id string) (domain.CaseFeedback, error)
+	GetCaseFeedback(ctx context.Context, id string) (domain.CaseEmojiFeedback, error)
 	// SubmitCaseFeedback records feedback for the case identified by id. A ValidationError
 	// is returned for invalid input. Supported by the ServiceNow data source only.
 	SubmitCaseFeedback(ctx context.Context, id string, req domain.SubmitCaseFeedbackRequest) (domain.SubmitCaseFeedbackResponse, error)
@@ -389,13 +395,6 @@ type CaseService interface {
 	// (Postgres) data source, Content is always "" and StorageKey is populated instead: that
 	// data source holds no bytes, only a reference into external (SFTPGo) storage.
 	GetAttachmentByID(ctx context.Context, id string) (domain.AttachmentDetails, error)
-	// UpdateAttachment updates the name and/or description of the attachment identified by
-	// req.ID. A ValidationError is returned for invalid input. For ServiceNow, referenceType
-	// must be "case" or "deployment" ("case" requires name and forbids description;
-	// "deployment" requires at least one of name or description). The CSM-native (Postgres)
-	// data source only models case attachments, so it accepts referenceType "case" only, with
-	// the same name-required/description-forbidden rule.
-	UpdateAttachment(ctx context.Context, req domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error)
 }
 
 // CaseGithubIssueService defines the operation for filing a GitHub issue from a case.
@@ -416,6 +415,20 @@ type CatalogService interface {
 	// GetCatalogItemVariables returns the variables (form fields) for a specific catalog item.
 	// A NotFoundError is returned if the catalog or item does not exist.
 	GetCatalogItemVariables(ctx context.Context, catalogID, catalogItemID string) (domain.GetCatalogItemVariablesResponse, error)
+}
+
+// FeedbackService defines the operations available on the case-feedback (satisfaction
+// rating) entity, for the case-feedback dashboard's list and rating-trend views.
+// All methods require the ServiceNow data source; there is no Postgres fallback.
+type FeedbackService interface {
+	// SearchFeedback returns a paginated list of case-feedback records, optionally
+	// filtered by case, accounts, and submission date range. A ValidationError is
+	// returned for invalid input.
+	SearchFeedback(ctx context.Context, req domain.SearchFeedbackRequest) (domain.SearchFeedbackResponse, error)
+	// AggregateFeedback returns date-bucketed average-rating aggregates across cases,
+	// optionally filtered by accounts and submission date range. Bucket is required.
+	// A ValidationError is returned for invalid input.
+	AggregateFeedback(ctx context.Context, req domain.AggregateFeedbackRequest) (domain.AggregateFeedbackResponse, error)
 }
 
 // CallRequestService defines the operations available on the call_requests entity.
@@ -449,11 +462,11 @@ type ChangeRequestService interface {
 	// project IDs, state keys, impact keys, date ranges, and search query.
 	SearchChangeRequests(ctx context.Context, req domain.SearchChangeRequestsRequest) (domain.SearchChangeRequestsResponse, error)
 
-	// GroupChangeRequestsBy returns server-side aggregated counts of change requests
+	// AggregateChangeRequests returns server-side aggregated counts of change requests
 	// per value of req.GroupBy, capped to the top req.MaxGroups buckets with the
-	// remainder folded into GroupByResponse.OthersCount. A ValidationError is
+	// remainder folded into AggregateResponse.OthersCount. A ValidationError is
 	// returned for invalid input.
-	GroupChangeRequestsBy(ctx context.Context, req domain.GroupChangeRequestsByRequest) (domain.GroupByResponse, error)
+	AggregateChangeRequests(ctx context.Context, req domain.AggregateChangeRequestsRequest) (domain.AggregateResponse, error)
 
 	// GetChangeRequest returns the full detail of a single change request by its UUID.
 	GetChangeRequest(ctx context.Context, id string) (domain.ChangeRequest, error)
@@ -583,6 +596,26 @@ type ProductVulnerabilityService interface {
 	// GetVulnerabilityMeta returns the valid severity choices for product vulnerabilities.
 	// Supported by the ServiceNow data source only.
 	GetVulnerabilityMeta(ctx context.Context) (domain.VulnerabilityMetaResponse, error)
+	// SyncProductVulnerabilities replaces the full set of product vulnerabilities with the
+	// given items. This is a full-replace sync: ServiceNow deletes any existing record whose
+	// WSO2ID is not present in items and upserts everything that is. Callers MUST submit the
+	// complete current set, never a partial delta, or downstream records will be deleted.
+	// Supported by the ServiceNow data source only.
+	SyncProductVulnerabilities(ctx context.Context, items []domain.ProductVulnerabilitySyncItem) (domain.ProductVulnerabilitySyncResult, error)
+}
+
+// AlertService defines the operations available on alerts.
+type AlertService interface {
+	// GetAlertByID returns the detail of a single alert by its UUID.
+	// A NotFoundError is returned if the alert does not exist.
+	GetAlertByID(ctx context.Context, id string) (domain.AlertView, error)
+}
+
+// SmartAlertService defines the operations available on smart alerts.
+type SmartAlertService interface {
+	// GetSmartAlertByID returns the detail of a single smart alert by its UUID.
+	// A NotFoundError is returned if the smart alert does not exist.
+	GetSmartAlertByID(ctx context.Context, id string) (domain.SmartAlertView, error)
 }
 
 // IncidentService defines the operations available on the incidents entity.
@@ -591,11 +624,11 @@ type IncidentService interface {
 	// priority keys, and parent IDs. A ValidationError is returned for invalid input.
 	SearchIncidents(ctx context.Context, req domain.SearchIncidentsRequest) (domain.SearchIncidentsResponse, error)
 
-	// GroupIncidentsBy returns server-side aggregated counts of incidents per
+	// AggregateIncidents returns server-side aggregated counts of incidents per
 	// value of req.GroupBy, capped to the top req.MaxGroups buckets with the
-	// remainder folded into GroupByResponse.OthersCount. A ValidationError is
+	// remainder folded into AggregateResponse.OthersCount. A ValidationError is
 	// returned for invalid input.
-	GroupIncidentsBy(ctx context.Context, req domain.GroupIncidentsByRequest) (domain.GroupByResponse, error)
+	AggregateIncidents(ctx context.Context, req domain.AggregateIncidentsRequest) (domain.AggregateResponse, error)
 
 	// CreateIncident creates a new incident in ServiceNow.
 	// callerId, category, serviceId, impact, urgency, and subject are required.
@@ -620,11 +653,11 @@ type ProblemService interface {
 	// A ValidationError is returned for invalid input.
 	SearchProblems(ctx context.Context, req domain.SearchProblemsRequest) (domain.SearchProblemsResponse, error)
 
-	// GroupProblemsBy returns server-side aggregated counts of problems per
+	// AggregateProblems returns server-side aggregated counts of problems per
 	// value of req.GroupBy, capped to the top req.MaxGroups buckets with the
-	// remainder folded into GroupByResponse.OthersCount. A ValidationError is
+	// remainder folded into AggregateResponse.OthersCount. A ValidationError is
 	// returned for invalid input.
-	GroupProblemsBy(ctx context.Context, req domain.GroupProblemsByRequest) (domain.GroupByResponse, error)
+	AggregateProblems(ctx context.Context, req domain.AggregateProblemsRequest) (domain.AggregateResponse, error)
 
 	// GetProblem returns the full detail of a single problem by its UUID.
 	// A NotFoundError is returned if the problem does not exist.
@@ -633,6 +666,13 @@ type ProblemService interface {
 	// CreateProblem creates a new problem. Subject is required; OriginCaseID is optional.
 	// Supported by the ServiceNow data source only.
 	CreateProblem(ctx context.Context, req domain.CreateProblemRequest) (domain.ProblemDetail, error)
+
+	// UpdateProblem partially updates an existing problem -- a forward state transition
+	// (assess/confirm/fix/resolve/close), plain-field updates, or both in the same request. At
+	// least one field must be provided. Transition is validated by the data source, not here.
+	// A NotFoundError is returned if the problem does not exist; a ConflictError if the data
+	// source rejects or reverts the requested transition.
+	UpdateProblem(ctx context.Context, req domain.UpdateProblemRequest) (domain.UpdateProblemResponse, error)
 }
 
 // IncidentTaskService defines the operations available on the incident_task entity.
@@ -643,11 +683,11 @@ type IncidentTaskService interface {
 	// invalid input.
 	SearchIncidentTasks(ctx context.Context, req domain.SearchIncidentTasksRequest) (domain.SearchIncidentTasksResponse, error)
 
-	// GroupIncidentTasksBy returns server-side aggregated counts of incident
+	// AggregateIncidentTasks returns server-side aggregated counts of incident
 	// tasks per value of req.GroupBy, capped to the top req.MaxGroups buckets
-	// with the remainder folded into GroupByResponse.OthersCount. A
+	// with the remainder folded into AggregateResponse.OthersCount. A
 	// ValidationError is returned for invalid input.
-	GroupIncidentTasksBy(ctx context.Context, req domain.GroupIncidentTasksByRequest) (domain.GroupByResponse, error)
+	AggregateIncidentTasks(ctx context.Context, req domain.AggregateIncidentTasksRequest) (domain.AggregateResponse, error)
 
 	// GetIncidentTask returns the full detail of a single incident task by its UUID.
 	// A NotFoundError is returned if the incident task does not exist.

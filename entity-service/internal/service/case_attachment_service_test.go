@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -590,7 +591,7 @@ func TestCaseService_UpdateAttachment_RenamesFile(t *testing.T) {
 
 	name := "renamed.log"
 	resp, err := svc.UpdateAttachment(ctx, domain.UpdateAttachmentRequest{
-		ID:            testAttachmentID,
+		AttachmentID:  testAttachmentID,
 		ReferenceID:   testCaseID,
 		ReferenceType: domain.ReferenceTypeCase,
 		Name:          &name,
@@ -617,13 +618,13 @@ func TestCaseService_UpdateAttachment_RejectsDescriptionForCase(t *testing.T) {
 	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 
 	name := "renamed.log"
-	description := "not allowed"
+	description := json.RawMessage(`"not allowed"`)
 	_, err := svc.UpdateAttachment(ctx, domain.UpdateAttachmentRequest{
-		ID:            testAttachmentID,
+		AttachmentID:  testAttachmentID,
 		ReferenceID:   testCaseID,
 		ReferenceType: domain.ReferenceTypeCase,
 		Name:          &name,
-		Description:   &description,
+		Description:   description,
 	})
 	var ve *apierror.ValidationError
 	if !asValidationError(err, &ve) {
@@ -640,7 +641,7 @@ func TestCaseService_UpdateAttachment_RejectsDeploymentReferenceType(t *testing.
 
 	name := "renamed.log"
 	_, err := svc.UpdateAttachment(ctx, domain.UpdateAttachmentRequest{
-		ID:            testAttachmentID,
+		AttachmentID:  testAttachmentID,
 		ReferenceID:   testCaseID,
 		ReferenceType: domain.ReferenceTypeDeployment,
 		Name:          &name,
