@@ -1080,6 +1080,18 @@ function FilterBar({
                   label="State"
                   value={filterState}
                   onChange={(e) => setFilterState(e.target.value as TimeCardState | "")}
+                  slotProps={{
+                    // oxygen-ui's own theme shifts an unshrunk label up by
+                    // `top: -7px` for any Select-backed field (see
+                    // `MultiSelectField.tsx`'s doc comment) -- tie `shrink`
+                    // to whether a state is actually picked, rather than
+                    // MUI's focus-driven default.
+                    inputLabel: {
+                      shrink: filterState !== "",
+                      sx: { top: "0px !important" },
+                    },
+                    select: { notched: filterState !== "" },
+                  }}
                 >
                   <MenuItem value="">All states</MenuItem>
                   {FILTER_STATES.map((s) => (

@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
@@ -76,6 +78,9 @@ type entityCaseClient interface {
 	SearchComments(ctx context.Context, body []byte) ([]byte, error)
 	SearchCaseActivities(ctx context.Context, caseID string, body []byte) ([]byte, error)
 	SearchCases(ctx context.Context, body []byte) ([]byte, error)
+	AggregateCases(ctx context.Context, body []byte) ([]byte, error)
+	SearchFeedback(ctx context.Context, body []byte) ([]byte, error)
+	AggregateFeedback(ctx context.Context, body []byte) ([]byte, error)
 	GetCase(ctx context.Context, caseID string) ([]byte, error)
 	CreateCaseAttachment(ctx context.Context, body []byte) ([]byte, error)
 	SearchCaseAttachments(ctx context.Context, body []byte) ([]byte, error)
@@ -88,6 +93,8 @@ type entityCaseClient interface {
 	// CreateCaseAttachment with status "pending") to 'complete' — used by the
 	// SFTPGo-backed upload-confirm path; see AttachmentStorageHandler.
 	ConfirmCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error)
+	GetAttachment(ctx context.Context, attachmentID string) ([]byte, error)
+	UpdateAttachment(ctx context.Context, attachmentID string, body []byte) ([]byte, error)
 	CreateCallRequest(ctx context.Context, body []byte) ([]byte, error)
 	SearchCallRequests(ctx context.Context, body []byte) ([]byte, error)
 	SearchAllCallRequests(ctx context.Context, body []byte) ([]byte, error)
@@ -295,6 +302,7 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		var currentCase struct {
+			Type             string  `json:"type"`
 			State            string  `json:"state"`
 			WorkState        *string `json:"workState"`
 			AssignedEngineer *struct {
@@ -306,26 +314,38 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 			return
 		}
-		if currentCase.State != "work_in_progress" || currentCase.WorkState == nil || *currentCase.WorkState != "ongoing" {
-			writeError(w, http.StatusConflict, ErrMsgCommentNotAllowed)
-			return
-		}
-		// Ownership check. assignedEngineer.id is a platform user record id, so
-		// it can only be compared against the caller's own platform id — never
-		// against the identity provider's user id on the JWT. Resolved here,
-		// after the state gate, so the extra lookup is only paid on a request
-		// that would otherwise be accepted.
-		currentUserID := h.resolveCurrentUserID(r, user)
-		if currentUserID == "" {
-			// The caller's identity could not be established, so ownership
-			// cannot be decided either way: fail closed, but as a server-side
-			// failure rather than a misleading "you are not the assignee".
-			writeError(w, http.StatusInternalServerError, ErrMsgInternal)
-			return
-		}
-		if currentCase.AssignedEngineer == nil || currentCase.AssignedEngineer.ID == nil || *currentCase.AssignedEngineer.ID != currentUserID {
-			writeError(w, http.StatusForbidden, ErrMsgCommentNotOwnCase)
-			return
+		if currentCase.Type == caseTypeAnnouncement {
+			// Announcement cases publish immediately and have no
+			// work_in_progress/ongoing workflow, and may carry no assigned
+			// engineer at all — the state and ownership gates below don't
+			// apply. They still block new comments once closed, like every
+			// other case type.
+			if currentCase.State == caseStateClosed {
+				writeError(w, http.StatusConflict, ErrMsgCommentOnClosedCase)
+				return
+			}
+		} else {
+			if currentCase.State != caseStateWorkInProgress || currentCase.WorkState == nil || *currentCase.WorkState != "ongoing" {
+				writeError(w, http.StatusConflict, ErrMsgCommentNotAllowed)
+				return
+			}
+			// Ownership check. assignedEngineer.id is a platform user record id, so
+			// it can only be compared against the caller's own platform id — never
+			// against the identity provider's user id on the JWT. Resolved here,
+			// after the state gate, so the extra lookup is only paid on a request
+			// that would otherwise be accepted.
+			currentUserID := h.resolveCurrentUserID(r, user)
+			if currentUserID == "" {
+				// The caller's identity could not be established, so ownership
+				// cannot be decided either way: fail closed, but as a server-side
+				// failure rather than a misleading "you are not the assignee".
+				writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+				return
+			}
+			if currentCase.AssignedEngineer == nil || currentCase.AssignedEngineer.ID == nil || *currentCase.AssignedEngineer.ID != currentUserID {
+				writeError(w, http.StatusForbidden, ErrMsgCommentNotOwnCase)
+				return
+			}
 		}
 	}
 
@@ -503,6 +523,122 @@ func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// AggregateCases handles POST /cases/aggregate.
+// Server-side aggregation of cases by a single field (e.g. account, state),
+// capped to the top maxGroups buckets with the remainder folded into
+// othersCount. The groupBy allowlist is validated upstream by the entity
+// service; this layer only forwards the request and passes the response
+// through as-is.
+func (h *CaseHandler) AggregateCases(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.AggregateCases(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity AggregateCases failed", "userID", user.UserID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to aggregate cases.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// SearchFeedback handles POST /cases/feedback/search.
+// Search of case-feedback (satisfaction rating) records across cases,
+// filterable by case, accounts, and submission date range. Backs the
+// case-feedback dashboard's list view. This is a plain forward-and-return
+// proxy: filters/pagination validation is the entity service's job, this
+// layer only enforces auth, a body size cap, and valid JSON.
+func (h *CaseHandler) SearchFeedback(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.SearchFeedback(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SearchFeedback failed", "userID", user.UserID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to search case feedback.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// AggregateFeedback handles POST /cases/feedback/aggregate.
+// Date-bucketed rating aggregation of case-feedback records across cases.
+// Backs the case-feedback dashboard's rating-trend chart. Same
+// forward-and-return proxy contract as SearchFeedback: the bucket enum and
+// filters are validated upstream by the entity service.
+func (h *CaseHandler) AggregateFeedback(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.AggregateFeedback(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity AggregateFeedback failed", "userID", user.UserID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to aggregate case feedback.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
 // CreateCaseAttachment handles POST /attachments.
 func (h *CaseHandler) CreateCaseAttachment(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
@@ -647,6 +783,133 @@ func (h *CaseHandler) DeleteCaseAttachment(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity DeleteCaseAttachment failed", "userID", user.UserID, "attachmentID", attachmentID, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to delete case attachment.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetAttachment handles GET /attachments/{id}.
+// Returns the attachment's metadata as JSON; for the binary file contents, see
+// GetCaseAttachmentContent (GET /attachments/{id}/content).
+func (h *CaseHandler) GetAttachment(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	attachmentID := r.PathValue("id")
+	if attachmentID == "" || !uuidRe.MatchString(attachmentID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	result, err := h.entity.GetAttachment(r.Context(), attachmentID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetAttachment failed", "userID", user.UserID, "attachmentID", attachmentID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to retrieve attachment.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// validAttachmentReferenceTypes mirrors the entity service's own
+// validReferenceTypes allowlist for attachment operations (sn_case_service.go),
+// so an obviously invalid referenceType is rejected at this boundary instead
+// of reaching the entity service.
+var validAttachmentReferenceTypes = map[string]bool{
+	"case":           true,
+	"conversation":   true,
+	"change_request": true,
+	"deployment":     true,
+	"incident":       true,
+}
+
+// updateAttachmentRequest mirrors the entity service's domain.UpdateAttachmentRequest
+// shape. Description uses json.RawMessage (rather than *string) so an explicit
+// JSON null (clear the description) can be distinguished from an absent field,
+// matching the entity service's own tri-state semantics for this field.
+type updateAttachmentRequest struct {
+	ReferenceID   string          `json:"referenceId"`
+	ReferenceType string          `json:"referenceType"`
+	Name          *string         `json:"name,omitempty"`
+	Description   json.RawMessage `json:"description,omitempty"`
+}
+
+// validateUpdateAttachmentBody rejects a non-object body (including null and
+// arrays), a missing/invalid referenceId, an invalid referenceType, and a body
+// where neither name nor description is present, so obviously invalid requests
+// are rejected before reaching the entity service.
+func validateUpdateAttachmentBody(body []byte) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return false
+	}
+	if len(fields) == 0 {
+		return false
+	}
+
+	var req updateAttachmentRequest
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		return false
+	}
+	if req.ReferenceID == "" || !uuidRe.MatchString(req.ReferenceID) {
+		return false
+	}
+	if !validAttachmentReferenceTypes[req.ReferenceType] {
+		return false
+	}
+	if req.Name == nil && len(req.Description) == 0 {
+		return false
+	}
+	return true
+}
+
+// UpdateAttachment handles PATCH /attachments/{id}.
+// Accepts referenceId, referenceType, and optionally name/description; the body
+// is forwarded verbatim once validated.
+func (h *CaseHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	attachmentID := r.PathValue("id")
+	if attachmentID == "" || !uuidRe.MatchString(attachmentID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	if !json.Valid(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	if !validateUpdateAttachmentBody(body) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.UpdateAttachment(r.Context(), attachmentID, body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity UpdateAttachment failed", "userID", user.UserID, "attachmentID", attachmentID, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to update attachment.")
 		return
 	}
 
@@ -856,10 +1119,12 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 
 	// Validate state transition and workState guard before forwarding to the entity service.
 	var patch struct {
-		State     *string `json:"state"`
-		WorkState *string `json:"workState"`
+		State              *string `json:"state"`
+		WorkState          *string `json:"workState"`
+		AutocloseHoldUntil *string `json:"autocloseHoldUntil"`
 	}
-	if err := json.Unmarshal(body, &patch); err == nil && (patch.State != nil || patch.WorkState != nil) {
+	patchErr := json.Unmarshal(body, &patch)
+	if patchErr == nil && (patch.State != nil || patch.WorkState != nil) {
 		current, err := h.entity.GetCase(r.Context(), caseID)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "entity GetCase failed during state validation", "userID", user.UserID, "caseID", caseID, "err", err)
@@ -884,6 +1149,34 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The auto-closure hold work note (below) must only fire for an actual change in
+	// the hold date, not for a retry or a no-op PATCH that resends the existing value —
+	// otherwise every duplicate request pollutes the case's activity feed with an
+	// identical note. Read the prior value before the PATCH; after it, the case
+	// already reflects the new value and there'd be nothing to diff against.
+	var priorHoldDate string
+	if patchErr == nil && patch.AutocloseHoldUntil != nil {
+		if current, err := h.entity.GetCase(r.Context(), caseID); err != nil {
+			slog.WarnContext(r.Context(), "entity GetCase failed reading prior autoclose hold date; proceeding without dedup", "userID", user.UserID, "caseID", caseID, "err", err)
+		} else {
+			// autoclosureStateTime is only "the hold date" while the case is actually
+			// ON_HOLD — for every other autoclosureStep it's when that other stage next
+			// advances, a value unrelated to any hold. Without gating on the step, the
+			// very first hold on a case (whose autoclosureStateTime already holds some
+			// unrelated staged-advance date matching the FE's pre-filled picker default)
+			// gets misread as "unchanged" and its note silently skipped.
+			var currentCase struct {
+				AutoclosureStep      *string `json:"autoclosureStep"`
+				AutoclosureStateTime *string `json:"autoclosureStateTime"`
+			}
+			if err := json.Unmarshal(current, &currentCase); err == nil &&
+				currentCase.AutoclosureStep != nil && *currentCase.AutoclosureStep == "ON_HOLD" &&
+				currentCase.AutoclosureStateTime != nil {
+				priorHoldDate = formatHoldDate(*currentCase.AutoclosureStateTime)
+			}
+		}
+	}
+
 	result, err := h.entity.PatchCase(r.Context(), caseID, body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity PatchCase failed", "userID", user.UserID, "caseID", caseID, "err", err)
@@ -891,7 +1184,64 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Setting/extending the auto-closure hold has no visible trail of its own on the
+	// case (unlike the legacy ticketing UI's equivalent action, which records a work
+	// note). Record one here so CS engineers can see when a hold was set/extended and
+	// until when. Best-effort and fire-and-forget: the hold PATCH above already
+	// succeeded, so this secondary write must not delay the response or fail/roll back
+	// the request if it errors. context.WithoutCancel keeps the request-scoped values
+	// the entity client needs (x-user-id-token, correlation id) while detaching from
+	// the request's own cancellation, which fires as soon as the handler returns —
+	// a bare context.Background() would drop those values and the note would reach
+	// the entity service unattributed.
+	if patchErr == nil && patch.AutocloseHoldUntil != nil && formatHoldDate(*patch.AutocloseHoldUntil) != priorHoldDate {
+		holdUntil := *patch.AutocloseHoldUntil
+		detached := context.WithoutCancel(r.Context())
+		go func() {
+			ctx, cancel := context.WithTimeout(detached, 15*time.Second)
+			defer cancel()
+			h.recordAutocloseHoldWorkNote(ctx, user, caseID, holdUntil)
+		}()
+	}
+
 	writeJSON(w, http.StatusOK, result)
+}
+
+// formatHoldDate renders an auto-closure hold timestamp (RFC3339, as sent by the
+// FE or read back from the entity service) as the date-only form CS engineers see
+// in the UI and in the work note, since the hold is date-granularity. Falls back
+// to the raw input when it doesn't parse, so an already-invalid value is not
+// silently dropped from the comparison/note.
+func formatHoldDate(raw string) string {
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t.Format("2006-01-02")
+	}
+	return raw
+}
+
+// recordAutocloseHoldWorkNote adds an internal work note documenting an
+// auto-closure hold set/extension, mirroring the work note the legacy
+// ticketing UI's equivalent action used to write. Best-effort: failures are
+// logged, never surfaced to the caller, since the primary hold PATCH already
+// succeeded by the time this runs.
+func (h *CaseHandler) recordAutocloseHoldWorkNote(ctx context.Context, user *middleware.UserInfo, caseID, holdUntil string) {
+	note := "Please note that this case is on-hold until " + formatHoldDate(holdUntil) +
+		", hence it will not go through the auto closure process. It will be eligible " +
+		"for auto-closure again after this date passes, or if the case state is changed " +
+		"to 'Waiting on WSO2'."
+
+	body, err := json.Marshal(map[string]string{
+		"type":    "work_note",
+		"content": note,
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to build autoclose hold work note body", "userID", user.UserID, "caseID", caseID, "err", err)
+		return
+	}
+
+	if _, err := h.entity.CreateCaseComment(ctx, caseID, body); err != nil {
+		slog.WarnContext(ctx, "failed to record autoclose hold work note", "userID", user.UserID, "caseID", caseID, "err", err)
+	}
 }
 
 // GetCase handles GET /cases/{id}.
