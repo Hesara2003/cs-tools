@@ -3047,9 +3047,13 @@ func (s *snCaseService) DeleteCaseAttachment(ctx context.Context, req domain.Del
 }
 
 // snAttachmentDetails mirrors the Choreo GET /attachments/{id} response
-// (Ballerina's AttachmentResponse — every Attachment field plus content).
-// ServiceNow's attachment-details lookup returns a bare createdBy string with
-// no createdByUser/referenceType, unlike the search path (see snAttachment).
+// (Ballerina's AttachmentResponse -- every Attachment field plus content).
+// The response does carry createdByUser/createdByFullName, but this lookup
+// does not resolve them: createdByUser arrives null, unlike the search path
+// (see snAttachment), so CreatedBy stays the bare string below. Do not
+// "align" this decode with the search path's UserReference shape on the
+// assumption the object is populated here -- it is not. referenceType is
+// genuinely absent from this response.
 type snAttachmentDetails struct {
 	ID          string  `json:"id"`
 	ReferenceID string  `json:"referenceId"`

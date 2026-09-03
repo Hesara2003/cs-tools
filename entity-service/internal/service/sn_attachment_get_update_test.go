@@ -21,6 +21,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -33,6 +34,92 @@ var (
 
 // TestSNCaseService_GetAttachment_NotFound verifies a 404 from the backing service
 // surfaces as a NotFoundError.
+// TestSNCaseService_GetAttachmentByID_HappyPath proves a well-formed response
+// decodes into domain.AttachmentDetails: the id/referenceId sysid->uuid
+// mapping, the base64 content, and the createdOn parse.
+//
+// That parse is why this test matters -- GetAttachmentByID returns an error for
+// the whole call if createdOn does not match snCreatedOnLayout, so an upstream
+// format change breaks the endpoint outright rather than degrading a field.
+func TestSNCaseService_GetAttachmentByID_HappyPath(t *testing.T) {
+	attachmentUUID := sysidToUUID(testAttachmentSysid)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/attachments/"+testAttachmentSysid, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", r.Method)
+		}
+		_, _ = w.Write([]byte(`{
+			"id": "` + testAttachmentSysid + `",
+			"referenceId": "` + testAttachmentRefSysid + `",
+			"name": "logs.txt",
+			"type": "text/plain",
+			"sizeBytes": 1024,
+			"description": "Diagnostic logs",
+			"createdBy": "jane.doe@example.com",
+			"createdByFullName": "Jane Doe",
+			"createdByUser": null,
+			"createdOn": "2026-01-01 00:00:00",
+			"downloadUrl": "https://example.com/download/1",
+			"previewUrl": "https://example.com/preview/1",
+			"content": "bG9ncw=="
+		}`))
+	})
+
+	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil)
+
+	got, err := svc.GetAttachmentByID(contextWithUserIDToken("token"), attachmentUUID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got.ID != attachmentUUID {
+		t.Errorf("ID = %q, want %q", got.ID, attachmentUUID)
+	}
+	if want := sysidToUUID(testAttachmentRefSysid); got.ReferenceID != want {
+		t.Errorf("ReferenceID = %q, want %q", got.ReferenceID, want)
+	}
+	if got.Name != "logs.txt" || got.Type != "text/plain" || got.SizeBytes != 1024 {
+		t.Errorf("name/type/size = %q/%q/%d, want logs.txt/text/plain/1024", got.Name, got.Type, got.SizeBytes)
+	}
+	if got.Description == nil || *got.Description != "Diagnostic logs" {
+		t.Errorf("Description = %v, want \"Diagnostic logs\"", got.Description)
+	}
+	// createdByUser is null on this path, so the bare string is what survives.
+	if got.CreatedBy != "jane.doe@example.com" {
+		t.Errorf("CreatedBy = %q, want jane.doe@example.com", got.CreatedBy)
+	}
+	if want := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC); !got.CreatedOn.Equal(want) {
+		t.Errorf("CreatedOn = %v, want %v", got.CreatedOn, want)
+	}
+	if got.Content == nil || *got.Content != "bG9ncw==" {
+		t.Errorf("Content = %v, want the base64 body", got.Content)
+	}
+	if got.DownloadURL == nil || *got.DownloadURL != "https://example.com/download/1" {
+		t.Errorf("DownloadURL = %v", got.DownloadURL)
+	}
+	if got.PreviewURL == nil || *got.PreviewURL != "https://example.com/preview/1" {
+		t.Errorf("PreviewURL = %v", got.PreviewURL)
+	}
+}
+
+// TestSNCaseService_GetAttachmentByID_RejectsUnparseableCreatedOn pins the
+// failure mode above: an unexpected createdOn format fails the call loudly
+// rather than yielding a zero timestamp the caller would render as 1 Jan 0001.
+func TestSNCaseService_GetAttachmentByID_RejectsUnparseableCreatedOn(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/attachments/"+testAttachmentSysid, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"` + testAttachmentSysid + `","createdOn":"2026-01-01T00:00:00Z"}`))
+	})
+
+	svc := NewServiceNowCaseService(newTestSNClient(t, mux), nil, nil)
+
+	_, err := svc.GetAttachmentByID(contextWithUserIDToken("token"), sysidToUUID(testAttachmentSysid))
+	if err == nil {
+		t.Fatal("expected an error for an RFC3339 createdOn, got nil")
+	}
+}
+
 func TestSNCaseService_GetAttachment_NotFound(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/attachments/"+testAttachmentSysid, func(w http.ResponseWriter, r *http.Request) {

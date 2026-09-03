@@ -54,6 +54,10 @@ export interface AccountDto {
   deactivationDate?: string | null;
   ownerId?: string | null;
   owner?: AccountOwnerRefDto | null;
+  /** The unified AccountView's replacement for `owner` — the same {id, name}
+   *  reference under a new key (it also carries `email`, which this app ignores).
+   *  Both are declared so the mapping works whichever key the backend sends. */
+  accountManager?: AccountOwnerRefDto | null;
   technicalOwnerId?: string | null;
   technicalOwner?: AccountOwnerRefDto | null;
   agentEnabled?: boolean;

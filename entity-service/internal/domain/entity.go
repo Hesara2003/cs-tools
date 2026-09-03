@@ -4800,11 +4800,11 @@ type CaseEmojiFeedback struct {
 // the two data sources differ) ---
 
 // AttachmentDetails is the response for GET /attachments/{id} — attachment
-// metadata plus its base64-encoded file content. Note ServiceNow's
-// attachment-details lookup does not resolve the uploader to a UserReference
-// the way the search/comment paths do (only those two carry a createdByUser
-// object) — CreatedBy is a bare string here, and there is no ReferenceType in
-// the upstream response at all, so it is deliberately not modeled below.
+// metadata plus its base64-encoded file content. The upstream response does
+// include a createdByUser key, but this lookup leaves it null rather than
+// resolving the uploader the way the search/comment paths do — so CreatedBy is
+// a bare string here. ReferenceType is genuinely absent from the upstream
+// response, so it is deliberately not modeled below.
 type AttachmentDetails struct {
 	ID          string    `json:"id"`
 	ReferenceID string    `json:"referenceId"`
