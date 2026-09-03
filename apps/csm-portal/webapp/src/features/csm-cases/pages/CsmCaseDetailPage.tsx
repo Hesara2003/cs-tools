@@ -1209,6 +1209,34 @@ export default function CsmCaseDetailPage(): JSX.Element {
         return;
       }
 
+      // Mark / recall the case's workaround via PATCH { workaroundProvided }.
+      // A single-field toggle, same shape as the plain "Pause work" branch
+      // above — no conflict check needed (unlike resuming work).
+      if (action.secondary === "toggle_workaround_provided") {
+        const providing = !data?.workaroundProvidedOn;
+        patchCase.mutate(
+          { workaroundProvided: providing },
+          {
+            onSuccess: () =>
+              setFeedback({
+                message: providing
+                  ? "Workaround marked as provided — the Workaround SLA clock is paused."
+                  : "Workaround recalled.",
+                severity: "success",
+                sticky: false,
+              }),
+            onError: (err) =>
+              showError(
+                providing
+                  ? "Could not mark the workaround as provided. Please try again."
+                  : "Could not recall the workaround. Please try again.",
+                err,
+              ),
+          },
+        );
+        return;
+      }
+
       // Request update opens the reminder-template dialog; the POST happens
       // in onRequestUpdate once a stage (or custom message) is confirmed.
       if (action.secondary === "request_update") {
