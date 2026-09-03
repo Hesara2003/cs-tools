@@ -493,8 +493,17 @@ export default function CasesList({
                         {c.projectName}
                       </Typography>
                     </Box>
+                    {/* Same fix as Subject above, for the same reason: every
+                        optional column's own track is `minmax(140px, 1fr)`
+                        (see caseListColumns.ts) — mechanically identical to
+                        Subject's `minmax(280px, 3fr)` — so without a real
+                        max-width here too, one long product/customer/person
+                        name in an optional column can blow up the grid's
+                        width exactly like an unbounded Subject used to
+                        (reported live for Security Reports' Product column,
+                        but the bug is shared by every CasesList caller). */}
                     {effectiveOptionalColumns.map((id) => (
-                      <Box key={id} sx={{ minWidth: 0 }}>
+                      <Box key={id} sx={{ minWidth: 0, maxWidth: 260 }}>
                         {renderOptionalCell(id, c)}
                       </Box>
                     ))}
