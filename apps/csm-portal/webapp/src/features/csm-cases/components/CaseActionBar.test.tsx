@@ -871,7 +871,7 @@ describe("acknowledge action", () => {
   });
 });
 
-describe("CaseActionBar — Provide / Recall workaround (digiops-cs#2956)", () => {
+describe("CaseActionBar — Provide / Recall workaround", () => {
   it("shows 'Provide workaround' and dispatches toggle_workaround_provided when unset", () => {
     const onAction = vi.fn();
     render(
