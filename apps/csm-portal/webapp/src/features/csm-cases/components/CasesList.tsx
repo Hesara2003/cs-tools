@@ -478,8 +478,17 @@ export default function CasesList({
                         is clamped by its own specified max-width, so without
                         one here a single unusually long subject forced this
                         default, always-visible column to scroll horizontally
-                        even with zero optional columns turned on. */}
-                    <Box sx={{ minWidth: 0, maxWidth: 480 }}>
+                        even with zero optional columns turned on. 360 (not a
+                        more generous first attempt of 480) matches
+                        ChangeRequestsTab.tsx/IncidentsTab.tsx's own Subject
+                        column cap — a cap that's merely "bounded" instead of
+                        "small enough" still adds up: 480 (Subject) + 260
+                        (one default-visible optional column) + the other
+                        default columns' own floors summed to more than a
+                        normal viewport width, forcing horizontal scroll on
+                        the *default* view even with everyday-length values,
+                        not just pathologically long ones. */}
+                    <Box sx={{ minWidth: 0, maxWidth: 360 }}>
                       <Typography variant="body2" noWrap title={c.subject}>
                         {c.subject}
                       </Typography>

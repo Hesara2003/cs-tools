@@ -132,7 +132,7 @@ describe("CasesList — Subject cell has a capped width", () => {
 
     const subjectCell = screen.getByTitle(longSubject).parentElement;
     expect(subjectCell).not.toBeNull();
-    expect(getComputedStyle(subjectCell!).maxWidth).toBe("480px");
+    expect(getComputedStyle(subjectCell!).maxWidth).toBe("360px");
   });
 
   // Regression: reported live for Security Reports' Product column, but the
