@@ -75,13 +75,14 @@ import {
 } from "@features/csm-cases/api/useCsmCaseComments";
 import { useGetCsmConversationMessages } from "@features/csm-cases/api/useCsmConversationMessages";
 import { useGetCsmCaseActivities } from "@features/csm-cases/api/useCsmCaseActivities";
+import { useCaseActivityStream } from "@features/csm-cases/api/useCaseActivityStream";
 import { useGetCsmCaseFeedback } from "@features/csm-cases/api/useCsmCaseFeedback";
 import {
   useGetCsmCaseAttachments,
   usePostCsmCaseAttachment,
   useDownloadCsmCaseAttachment,
   useDeleteCsmCaseAttachment,
-  useGetCsmCaseAttachmentContent,
+  useGetCsmCaseAttachmentPreviewSource,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
 import CaseActionBar, {
@@ -491,6 +492,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
     refetch: refetchActivities,
     isFetching: isFetchingActivities,
   } = useGetCsmCaseActivities(caseId);
+  // Live updates: invalidates the two queries above whenever another viewer
+  // adds a comment or the case's status changes, so this tab doesn't rely
+  // solely on their own staleTime/a manual refresh to catch up.
+  useCaseActivityStream(caseId);
   // Case Feedback (CSAT survey) submissions for this case, if any — almost
   // always empty for an open case (the survey goes out after closure), which
   // is expected and renders no feedback lane rather than an error.
@@ -524,7 +529,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
   } = useGetCsmCaseAttachments(caseId);
   const postAttachment = usePostCsmCaseAttachment();
   const downloadAttachment = useDownloadCsmCaseAttachment();
-  const getAttachmentPreviewContent = useGetCsmCaseAttachmentContent();
+  const getAttachmentPreviewContent = useGetCsmCaseAttachmentPreviewSource();
   const deleteAttachment = useDeleteCsmCaseAttachment();
   // Fetched unconditionally (not just while their tab is active) purely for
   // the tab-label counts below; each widget still runs its own scoped query
@@ -1742,6 +1747,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
 
   const attachmentList = useMemo(() => attachments ?? [], [attachments]);
 
+  // `postAttachment` is a single shared mutation object that stays mounted
+  // across `caseId` changes (this page doesn't remount on navigation between
+  // cases). Without this check, an upload still in flight for a previously
+  // viewed case would show its progress/disabled state on whichever case is
+  // open now. `variables` reflects whichever call is currently pending, so
+  // comparing its `caseId` to the page's current `caseId` scopes the
+  // in-flight state to the case it actually belongs to.
+  const isUploadingForThisCase =
+    postAttachment.isPending && postAttachment.variables?.caseId === caseId;
+
   // Case comments + the linked chat transcript, as one list for the activity
   // feed. Memoised so the feed's own sort doesn't rerun on every render.
   const mergedComments = useMemo(
@@ -2603,9 +2618,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
             onRefresh={() => void refetchAttachments()}
             isRefreshing={isFetchingAttachments}
             refreshedAt={attachmentsUpdatedAt}
-            uploading={postAttachment.isPending}
+            uploading={isUploadingForThisCase}
+            uploadProgress={isUploadingForThisCase ? postAttachment.uploadProgress : null}
             uploadError={
-              postAttachment.isError
+              postAttachment.isError &&
+              postAttachment.variables?.caseId === caseId
                 ? (postAttachment.error?.message ??
                   "Could not upload the attachment.")
                 : null

@@ -65,7 +65,10 @@ import DirectoryEntityChip from "@features/csm-admin/components/DirectoryEntityC
 import { useSearchUsersByName } from "@api/useSearchUsersByName";
 import { userLabel } from "@features/csm-operations/utils/incidentFormOptions";
 import AttachmentPreviewDialog from "@features/csm-cases/components/AttachmentPreviewDialog";
-import { getAttachmentPreviewKind } from "@features/csm-cases/utils/attachmentPreview";
+import {
+  getAttachmentPreviewKind,
+  type AttachmentPreviewSource,
+} from "@features/csm-cases/utils/attachmentPreview";
 import type {
   CaseAttachment,
   CaseAuditEntry,
@@ -845,6 +848,7 @@ export function AttachmentsWidget({
   error = false,
   onRetry,
   uploading = false,
+  uploadProgress = null,
   uploadError,
   onUpload,
   onDownloadAll,
@@ -864,6 +868,13 @@ export function AttachmentsWidget({
   onRetry?: () => void;
   /** An upload is in flight. */
   uploading?: boolean;
+  /**
+   * 0-100 while a direct-to-SFTPGo upload is in flight (see
+   * `usePostCsmCaseAttachment`'s `uploadProgress`), `null`/omitted otherwise
+   * — including for the default upload path, which has no granular
+   * progress and falls back to an indeterminate bar.
+   */
+  uploadProgress?: number | null;
   /** Message shown when the last upload failed (size, network, 413, …). */
   uploadError?: string | null;
   onUpload?: (file: File) => void;
@@ -882,8 +893,10 @@ export function AttachmentsWidget({
    * only some of the fields.
    */
   preview?: {
-    /** Fetch an attachment's raw bytes for inline preview. */
-    onGetPreviewContent: (attachment: CaseAttachment) => Promise<Blob>;
+    /** Resolve a previewable URL for an attachment's inline preview. */
+    onGetPreviewContent: (
+      attachment: CaseAttachment,
+    ) => Promise<AttachmentPreviewSource>;
     /**
      * Attachment currently shown in the preview dialog, lifted to the parent
      * page so it can be reset on case-to-case navigation (this widget stays
@@ -934,7 +947,11 @@ export function AttachmentsWidget({
                 onClick={pickFile}
                 disabled={uploading}
               >
-                {uploading ? "Uploading…" : "Upload"}
+                {uploading
+                  ? uploadProgress != null
+                    ? `Uploading… ${uploadProgress}%`
+                    : "Uploading…"
+                  : "Upload"}
               </Button>
             )}
             <Button
@@ -958,7 +975,13 @@ export function AttachmentsWidget({
             aria-hidden
           />
         )}
-        {uploading && <LinearProgress sx={{ mb: 1 }} />}
+        {uploading && (
+          <LinearProgress
+            sx={{ mb: 1 }}
+            variant={uploadProgress != null ? "determinate" : "indeterminate"}
+            value={uploadProgress ?? undefined}
+          />
+        )}
         {uploadError && (
           <Typography variant="body2" color="error" sx={{ mb: 1 }}>
             {uploadError}
