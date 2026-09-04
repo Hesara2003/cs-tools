@@ -209,7 +209,7 @@ func main() {
 	mux.HandleFunc("GET /users/me", usersHandler.GetMe)
 	mux.HandleFunc("PATCH /users/me", usersHandler.PatchMe)
 	mux.HandleFunc("POST /users/search", usersHandler.SearchUsers)
-	mux.Handle("GET /users/{id}", middleware.RequireRoles(roleResolver, "admin")(http.HandlerFunc(usersHandler.GetUser)))
+	mux.HandleFunc("GET /users/{id}", usersHandler.GetUser)
 	mux.HandleFunc("POST /roles/search", referenceHandler.SearchRoles)
 	mux.HandleFunc("POST /teams/search", referenceHandler.SearchTeams)
 	mux.HandleFunc("GET /accounts/{id}", accountHandler.GetAccount)
