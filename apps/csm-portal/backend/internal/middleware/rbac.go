@@ -40,6 +40,7 @@ type RoleResolver interface {
 	GetRoles(ctx context.Context) ([]string, error)
 }
 
+// cachedRoleEntry holds cached user roles alongside an expiration timestamp.
 type cachedRoleEntry struct {
 	roles     []string
 	expiresAt time.Time
@@ -65,6 +66,7 @@ func NewRoleResolver(client EntityUserRolesClient, ttl time.Duration) *CachedRol
 	}
 }
 
+// entityRolesResponse models the payload returned by entity-service GET /users/me.
 type entityRolesResponse struct {
 	Roles []string `json:"roles"`
 }
@@ -143,7 +145,7 @@ func RequireRoles(resolver RoleResolver, allowedRoles ...string) func(http.Handl
 			}
 
 			if !hasAnyRole(roles, allowedRoles) {
-				slog.WarnContext(r.Context(), "rbac: user lacks required roles", "userID", user.UserID, "userRoles", roles, "allowedRoles", allowedRoles)
+				slog.WarnContext(r.Context(), "rbac: access denied: user lacks required roles", "userID", user.UserID)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusForbidden)
 				_ = json.NewEncoder(w).Encode(authErrorBody{Message: "You do not have permission to perform this action."})
@@ -156,6 +158,7 @@ func RequireRoles(resolver RoleResolver, allowedRoles ...string) func(http.Handl
 	}
 }
 
+// hasAnyRole reports whether userRoles contains at least one role from allowedRoles (case-insensitive).
 func hasAnyRole(userRoles, allowedRoles []string) bool {
 	for _, userRole := range userRoles {
 		for _, allowed := range allowedRoles {
