@@ -154,9 +154,9 @@ func (h *ProjectHandler) scopeToCallerProjects(ctx context.Context, baseReq enti
 
 	var paged []entity.ProjectView
 	if clientOffset < totalScoped {
-		end := clientOffset + clientLimit
-		if end > totalScoped {
-			end = totalScoped
+		end := totalScoped
+		if clientLimit < totalScoped-clientOffset {
+			end = clientOffset + clientLimit
 		}
 		paged = allScoped[clientOffset:end]
 	} else {
