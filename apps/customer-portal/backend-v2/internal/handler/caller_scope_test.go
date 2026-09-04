@@ -19,6 +19,8 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -263,6 +265,18 @@ func TestProjectHandler_SearchProjects_CallerScope(t *testing.T) {
 		body2 := rec2.Body.String()
 		if !strings.Contains(body2, `"totalRecords":3`) || !strings.Contains(body2, `"hasMore":false`) || !strings.Contains(body2, "p3") || strings.Contains(body2, "p1") {
 			t.Fatalf("unexpected page 2 response: %s", body2)
+		}
+
+		// Overflow protection: large limit (math.MaxInt) with offset 1 must not panic and slice correctly
+		reqOverflow := authedRequest(http.MethodPost, "/projects/search", fmt.Sprintf(`{"pagination":{"limit":%d,"offset":1}}`, math.MaxInt))
+		recOverflow := httptest.NewRecorder()
+		h.SearchProjects(recOverflow, reqOverflow)
+		if recOverflow.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", recOverflow.Code, recOverflow.Body.String())
+		}
+		bodyOverflow := recOverflow.Body.String()
+		if !strings.Contains(bodyOverflow, `"totalRecords":3`) || !strings.Contains(bodyOverflow, `"hasMore":false`) || !strings.Contains(bodyOverflow, "p2") || !strings.Contains(bodyOverflow, "p3") {
+			t.Fatalf("unexpected overflow test response: %s", bodyOverflow)
 		}
 	})
 }
@@ -945,7 +959,8 @@ func TestAIChatHandler_CallerScope(t *testing.T) {
 	})
 
 	t.Run("SendConversationMessage: member can send", func(t *testing.T) {
-		h := NewAIChatHandler(&fakeAIChatAgentClient{}, &fakeEntityConversationClient{})
+		fakeConv := entity.ConversationDetails{Project: &entity.EntityRef{ID: testProjectID}}
+		h := NewAIChatHandler(&fakeAIChatAgentClient{}, &fakeEntityConversationClient{conv: fakeConv})
 		h.SetCallerScope(resolver)
 
 		mux := http.NewServeMux()
@@ -1033,6 +1048,85 @@ func TestAIChatHandler_CallerScope(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("GET /conversations/{id}/messages", h.GetConversationMessages)
 		req := authedRequest(http.MethodGet, "/conversations/11111111-1111-1111-1111-111111111111/messages", "")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("SendConversationMessage: conversation belongs to different project returns 404", func(t *testing.T) {
+		fakeConv := entity.ConversationDetails{Project: &entity.EntityRef{ID: "88888888-8888-8888-8888-888888888888"}}
+		h := NewAIChatHandler(&fakeAIChatAgentClient{}, &fakeEntityConversationClient{conv: fakeConv})
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /projects/{projectId}/conversations/{conversationId}/messages", h.SendConversationMessage)
+		req := authedRequest(http.MethodPost, "/projects/"+testProjectID+"/conversations/11111111-1111-1111-1111-111111111111/messages", `{"message":"hello"}`)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("SendConversationMessage: conversation with nil project returns 404", func(t *testing.T) {
+		h := NewAIChatHandler(&fakeAIChatAgentClient{}, &fakeEntityConversationClient{conv: entity.ConversationDetails{}})
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("POST /projects/{projectId}/conversations/{conversationId}/messages", h.SendConversationMessage)
+		req := authedRequest(http.MethodPost, "/projects/"+testProjectID+"/conversations/11111111-1111-1111-1111-111111111111/messages", `{"message":"hello"}`)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("GetConversation: nil project gets 404", func(t *testing.T) {
+		fake := &fakeEntityConversationClient{conv: entity.ConversationDetails{Project: nil}}
+		h := NewAIChatHandler(&fakeAIChatAgentClient{}, fake)
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /conversations/{id}", h.GetConversation)
+		req := authedRequest(http.MethodGet, "/conversations/11111111-1111-1111-1111-111111111111", "")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("GetConversationMessages: nil project gets 404", func(t *testing.T) {
+		fake := &fakeEntityConversationClient{conv: entity.ConversationDetails{Project: nil}}
+		h := NewAIChatHandler(&fakeAIChatAgentClient{}, fake)
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /conversations/{id}/messages", h.GetConversationMessages)
+		req := authedRequest(http.MethodGet, "/conversations/11111111-1111-1111-1111-111111111111/messages", "")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("UpdateConversation: nil project gets 404", func(t *testing.T) {
+		fake := &fakeEntityConversationClient{conv: entity.ConversationDetails{Project: nil}}
+		h := NewAIChatHandler(&fakeAIChatAgentClient{}, fake)
+		h.SetCallerScope(resolver)
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("PATCH /conversations/{id}", h.UpdateConversation)
+		req := authedRequest(http.MethodPatch, "/conversations/11111111-1111-1111-1111-111111111111", `{"status":"closed"}`)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
