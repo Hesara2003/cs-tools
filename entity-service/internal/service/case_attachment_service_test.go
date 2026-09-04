@@ -467,6 +467,12 @@ func TestCaseService_GetAttachmentByID_ReturnsStorageKeyNotContent(t *testing.T)
 	if details.CreatedBy != "jane.doe@example.com" {
 		t.Fatalf("expected createdBy email, got %q", details.CreatedBy)
 	}
+	if details.ReferenceID != testCaseID {
+		t.Fatalf("expected referenceId %q, got %q", testCaseID, details.ReferenceID)
+	}
+	if details.ReferenceType == nil || *details.ReferenceType != domain.ReferenceTypeCase {
+		t.Fatalf("expected referenceType %q, got %v", domain.ReferenceTypeCase, details.ReferenceType)
+	}
 }
 
 // TestCaseService_GetAttachmentByID_NotFound proves a missing attachment

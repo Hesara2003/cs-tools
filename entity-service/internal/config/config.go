@@ -104,10 +104,23 @@ func getEnvOrDefault(key, defaultVal string) string {
 	return defaultVal
 }
 
+// HasDatabase reports whether a Postgres connection is configured. It is the
+// gate cmd/api/main.go uses to decide whether to open a pool at all, and
+// routes.go uses to decide whether to register the Postgres-only endpoints
+// (event_publish_failures, sla_clocks).
+//
+// Validate guarantees this is all-or-nothing: either all three of
+// DB_USER/DB_PASSWORD/DB_NAME are set, or none are. So checking DBUser alone
+// would be equivalent — all three are named here to make the contract obvious
+// at the call site rather than relying on that invariant holding elsewhere.
+func (c *Config) HasDatabase() bool {
+	return c.DBUser != "" && c.DBPassword != "" && c.DBName != ""
+}
+
 // Validate checks that the configuration is self-consistent. It returns an
-// error if DATA_SOURCE is an unrecognised value, if DB_USER/DB_PASSWORD/DB_NAME
-// are missing (required regardless of DATA_SOURCE — see db.NewPoolFromConfig),
-// if SERVICENOW_INTEGRATION_SERVICE_BASE_URL is missing when
+// error if DATA_SOURCE is an unrecognised value, if the DB variables are
+// missing when DATA_SOURCE=postgres or only partially set in either mode, if
+// SERVICENOW_INTEGRATION_SERVICE_BASE_URL is missing when
 // DATA_SOURCE=servicenow, or if EVENT_HUB_BROKER/EVENT_HUB_CONNECTION_STRING/
 // EVENT_HUB_TOPIC are only partially set.
 func (c *Config) Validate() error {
@@ -117,25 +130,36 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("invalid DATA_SOURCE %q: must be %q or %q", c.DataSource, DataSourcePostgres, DataSourceServiceNow)
 	}
-	// Postgres is required for every DataSource, not just DataSourcePostgres:
-	// event_publish_failures, sla_clocks, and scheduled_task_run have no
-	// ServiceNow equivalent, so routes.go wires their repositories
-	// unconditionally and cmd/api/main.go opens the pool before serving.
-	// Earlier versions skipped the pool in servicenow mode (the removed
-	// db.NewPoolIfNeeded), so a servicenow deployment that never had DB
-	// credentials fails here on upgrade — hence the explicit reason in each
-	// message rather than a bare "X is required".
-	const dbAlwaysRequired = "PostgreSQL is required for every DATA_SOURCE, " +
-		"including servicenow (event_publish_failures, sla_clocks, and " +
-		"scheduled_task_run have no ServiceNow equivalent)"
-	if c.DBUser == "" {
-		return fmt.Errorf("DB_USER is required: %s", dbAlwaysRequired)
+
+	// DB_USER/DB_PASSWORD/DB_NAME are required only when DATA_SOURCE=postgres,
+	// which serves every entity read and write from this pool.
+	//
+	// When DATA_SOURCE=servicenow they are OPTIONAL. Entity traffic goes to
+	// the SN integration service instead, and the two Postgres-only features
+	// (event_publish_failures, sla_clocks) degrade to not being registered at
+	// all rather than blocking startup — see HasDatabase's call sites in
+	// cmd/api/main.go and internal/server/routes.go. Requiring them in every
+	// mode would crash-loop existing DB-less servicenow deployments at boot
+	// with "DB_USER is required", which is what this branch exists to prevent.
+	dbSet := c.DBUser != "" || c.DBPassword != "" || c.DBName != ""
+	dbComplete := c.DBUser != "" && c.DBPassword != "" && c.DBName != ""
+
+	if c.DataSource == DataSourcePostgres && !dbComplete {
+		if c.DBUser == "" {
+			return fmt.Errorf("DB_USER is required when DATA_SOURCE=%s", DataSourcePostgres)
+		}
+		if c.DBPassword == "" {
+			return fmt.Errorf("DB_PASSWORD is required when DATA_SOURCE=%s", DataSourcePostgres)
+		}
+		return fmt.Errorf("DB_NAME is required when DATA_SOURCE=%s", DataSourcePostgres)
 	}
-	if c.DBPassword == "" {
-		return fmt.Errorf("DB_PASSWORD is required: %s", dbAlwaysRequired)
-	}
-	if c.DBName == "" {
-		return fmt.Errorf("DB_NAME is required: %s", dbAlwaysRequired)
+
+	// A partial set is always a misconfiguration, in either mode — the same
+	// all-or-nothing reasoning as the Event Hub group below. Silently running
+	// without a database because one of the three was left unset would
+	// disable event_publish_failures and sla_clocks without anyone noticing.
+	if dbSet && !dbComplete {
+		return fmt.Errorf("DB_USER, DB_PASSWORD, and DB_NAME must be set together or not at all")
 	}
 	if c.DataSource == DataSourceServiceNow {
 		if c.ServiceNowIntegrationServiceBaseURL == "" {

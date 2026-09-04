@@ -850,19 +850,20 @@ func (s *caseService) GetAttachmentByID(ctx context.Context, id string) (domain.
 	}
 
 	return domain.AttachmentDetails{
-		ID:          a.ID,
-		ReferenceID: a.ReferenceID,
-		Name:        a.Name,
-		Type:        a.Type,
-		SizeBytes:   a.SizeBytes,
-		Description: a.Description,
-		CreatedBy:   createdBy,
-		CreatedOn:   a.CreatedOn,
-		DownloadURL: a.DownloadURL,
-		PreviewURL:  a.PreviewURL,
-		Content:     nil,
-		StorageKey:  a.StorageKey,
-		Status:      a.Status,
+		ID:            a.ID,
+		ReferenceID:   a.ReferenceID,
+		ReferenceType: &a.ReferenceType,
+		Name:          a.Name,
+		Type:          a.Type,
+		SizeBytes:     a.SizeBytes,
+		Description:   a.Description,
+		CreatedBy:     createdBy,
+		CreatedOn:     a.CreatedOn,
+		DownloadURL:   a.DownloadURL,
+		PreviewURL:    a.PreviewURL,
+		Content:       nil,
+		StorageKey:    a.StorageKey,
+		Status:        a.Status,
 	}, nil
 }
 
