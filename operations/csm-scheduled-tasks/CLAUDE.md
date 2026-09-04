@@ -114,6 +114,31 @@ for that same task name, which no longer exists), and `housekeeping_cleanup` onl
 indefinitely. Deregistering a task requires manually resolving or deleting its open row in
 entity-service; there is no automatic cleanup for this case.
 
+## Stale cases report
+
+`internal/stalecases.SendReport`, registered as `"stale_cases_report"`, is this component's first
+sub-cron that sends an email on success rather than only on failure — see "Per-task report emails"
+below for why that's not a generic engine feature. Queries entity-service's `POST /cases/search`
+(via `internal/entitycases.Client.SearchOpenCasesOlderThan`) for every case whose `state` isn't
+`closed` and whose `createdOn` is at least 30 days in the past — a fixed threshold, not an env var;
+there's no operational need to tune it per deployment today (unlike
+`HOUSEKEEPING_RETENTION_DAYS` — see `cmd/server/main.go`'s `staleCaseThreshold` constant if that
+changes) — then emails a report table of them (oldest first) via `notify.RenderStaleCasesReport`.
+Default schedule `0 7 * * *` (daily at 07:00, same `TZ=UTC` caveat as "Housekeeping" above);
+override via `SUB_CRON_SCHEDULES`.
+
+Recipients are **not** `ALERT_RECIPIENTS` — that standing audience is about failure alerting, not
+report distribution. This task's report goes only to its own `SUB_CRON_RECIPIENTS` entry (`"to"`/
+`"cc"`, the same config surface every task's failure-alert recipients use — see "Alerting" below);
+a deployment that wants the same people getting both configures the same addresses in both places.
+If this task isn't mentioned in `SUB_CRON_RECIPIENTS` at all (`to` is empty), the handler skips the
+entity-service query entirely and just succeeds — no report to send means no reason to run the
+query on every tick.
+
+`internal/entitycases.Client` is a second entity-service client, separate from `internal/ledger`,
+even though both point at the same `CUSTOMER_ENTITY_SERVICE_BASE_URL`/credentials — see that
+package's own doc comment for why case search isn't just another method on `ledger.Client`.
+
 ## Alerting
 
 Two layers, combined:
@@ -133,10 +158,17 @@ empty — it still fails and retries normally either way, just silently as far a
 
 `ALERTS_ENABLED` (env var, default `true`) is a global kill switch above both layers —
 `engine.Engine.AlertsEnabled` — for going quiet during a maintenance window or a known-noisy period
-without editing either recipients config. Failures are still recorded in entity-service and logged
-either way; this only silences the email send in `Engine.recordFailure`. When it's `false`,
-`EMAIL_BASE_URL` is also no longer required at startup even if recipients are configured, since no
-email will ever actually be sent — see cmd/server/main.go's startup check.
+without editing any recipients config. Despite the name, it's not limited to failure alerts: it's
+the single switch for every email this component sends, so `stale_cases_report`'s own report email
+(see "Stale cases report" above) reads the same underlying value directly too, since that email
+isn't sent through `Engine.recordFailure` at all. For a failed task, `false` only silences the
+email — the failure is still recorded in entity-service and logged either way, and retries proceed
+normally. For `stale_cases_report` specifically, `false` skips the entity-service query and report
+rendering entirely, not just the send (see `stalecases.SendReport`'s own doc comment) — the task
+still succeeds and its ledger row still updates, it just does no work that tick. When
+`ALERTS_ENABLED` is `false`, `EMAIL_BASE_URL` is also no longer required at startup even if
+recipients are configured, since no email will ever actually be sent — see
+cmd/server/main.go's startup check.
 
 **Every single failed attempt sends an alert, not just a final give-up** — there is no "fully
 failed" or exhausted state in this design (see "The core mechanism" above), so this fires each time
@@ -151,7 +183,10 @@ a plain HTML template in the same table-based, WSO2-branded style
 that service's own functions of the same name) — task name, period, attempt count, next retry time,
 and the failure's error message.
 
-There is currently no success email — see "Future: per-task report emails" below for why.
+The engine itself still never sends a success email on any task's behalf — `stale_cases_report`'s
+report (see "Stale cases report" above) is sent from inside that task's own handler, not through
+this alerting path at all. See "Per-task report emails" below for why that's not a generic engine
+feature.
 
 ## Environment variables
 
@@ -163,11 +198,11 @@ There is currently no success email — see "Future: per-task report emails" bel
 | `EMAIL_BASE_URL` | No, but required if `ALERTS_ENABLED` is true and `ALERT_RECIPIENTS` or any task's `SUB_CRON_RECIPIENTS` "to" is non-empty (checked at startup) | Internal email notification service base URL (`POST /send-email`) — same service `integrations/csm-notification-service` uses. Authenticates with the same shared `OAUTH2_*` credentials, not its own |
 | `EMAIL_SCOPES` | No | Comma-separated OAuth2 scopes for the email client, using the shared credentials above |
 | `EMAIL_FROM_ADDRESS` | No | Fixed "From" address for every email this component sends |
-| `ALERTS_ENABLED` | No (default `true`) | Global kill switch for every failure alert email, above `ALERT_RECIPIENTS` and `SUB_CRON_RECIPIENTS` both — see "Alerting" above |
+| `ALERTS_ENABLED` | No (default `true`) | Global kill switch for every email this component sends — failure alerts and report-style tasks' own success emails alike — see "Alerting" above |
 | `ALERT_RECIPIENTS` | No | Comma-separated email addresses alerted on every failed sub-cron attempt, for every task — see "Alerting" above |
 | `DRIVER_INTERVAL` | No (default `1h`) | This component's own expected invocation cadence — must match the cron trigger configured on the Choreo Scheduled Task component itself |
 | `SUB_CRON_SCHEDULES` | No | JSON object `{"<task.Name>": "<cron expression>"}` overriding any registered task's schedule by name — see "Adding a sub-cron" above. A task not mentioned keeps its own hardcoded default |
-| `SUB_CRON_RECIPIENTS` | No | JSON object `{"<task.Name>": {"to": [...], "cc": [...]}}` giving a registered task its own extra failure-alert audience, on top of `ALERT_RECIPIENTS` — see "Alerting" and "Adding a sub-cron" above. A task not mentioned gets no per-task recipients |
+| `SUB_CRON_RECIPIENTS` | No | JSON object `{"<task.Name>": {"to": [...], "cc": [...]}}` giving a registered task its own extra failure-alert audience, on top of `ALERT_RECIPIENTS` — or, for `stale_cases_report` specifically, its report's actual recipients (see "Stale cases report" above). A task not mentioned gets no per-task recipients |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
 
 No app-level execution timeout is configured here — Choreo's own Scheduled Task execution-time
@@ -179,16 +214,23 @@ instead of being cut off mid-request with no chance to react.
 `.env` is auto-loaded from the working directory at startup if present (silently ignored if
 absent), matching `integrations/csm-notification-service`'s own convention.
 
-## Future: per-task report emails
+## Per-task report emails
 
-Not built yet, deliberately: `registry.Task` has no report-recipients field and `engine.recordSuccess`
-only updates the ledger, never sends anything. A generic one-size-fits-all "task succeeded" template
-was tried and dropped — different sub-crons will want genuinely different report content (a usage
-report reads nothing like a billing summary), so one shared template would either stay generic to
-the point of being useless or grow special cases per task. The intended shape when this is built:
-each real sub-cron owns its own template (in `internal/notify/templates/`, following `alert.html`'s
-pattern) and supplies its own `ReportRecipients`, rather than the engine rendering one shared shape
-for every task the way it does for alerts today.
+`engine.recordSuccess` still only ever updates the ledger — it never sends anything, and
+`registry.Task` still has no generic "report recipients" field. A generic one-size-fits-all "task
+succeeded" template was tried and dropped early on: different sub-crons want genuinely different
+report content (a usage report reads nothing like a billing summary), so one shared shape would
+either stay generic to the point of being useless or grow special cases per task.
+
+`stale_cases_report` (see "Stale cases report" above) is the first real instance of the shape that
+replaced it: the sub-cron's own package (`internal/stalecases`) owns both its template
+(`internal/notify/templates/stale_cases_report.html`, following `alert.html`'s pattern) and its
+recipients (its own `SUB_CRON_RECIPIENTS` entry, passed into `stalecases.SendReport` as plain `to`/
+`cc` slices) — the report is sent from inside the `Handler` closure itself, entirely outside
+`engine.Engine`'s own success/failure path. A future report-sending sub-cron follows the same
+pattern: its own template, its own render function in `internal/notify`, its own recipients wired
+through in `cmd/server/main.go` — there still isn't, and isn't meant to be, one shared "send a
+report" mechanism in `engine`.
 
 ## Future: events
 

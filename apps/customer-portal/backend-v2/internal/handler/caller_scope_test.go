@@ -901,6 +901,9 @@ func (f *fakeEntityConversationClient) UpdateConversation(_ context.Context, _ s
 func (f *fakeEntityConversationClient) SearchComments(_ context.Context, _ entity.SearchCommentsRequest) (entity.SearchCommentsResponse, error) {
 	return entity.SearchCommentsResponse{}, nil
 }
+func (f *fakeEntityConversationClient) GetProject(_ context.Context, _ string) (entity.ProjectDetailsView, error) {
+	return entity.ProjectDetailsView{Account: entity.ProjectAccountRef{ID: "account-1"}}, nil
+}
 
 func TestAIChatHandler_CallerScope(t *testing.T) {
 	contactsFake := &fakeEntityContacts{

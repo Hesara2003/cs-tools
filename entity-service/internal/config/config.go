@@ -117,14 +117,25 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("invalid DATA_SOURCE %q: must be %q or %q", c.DataSource, DataSourcePostgres, DataSourceServiceNow)
 	}
+	// Postgres is required for every DataSource, not just DataSourcePostgres:
+	// event_publish_failures, sla_clocks, and scheduled_task_run have no
+	// ServiceNow equivalent, so routes.go wires their repositories
+	// unconditionally and cmd/api/main.go opens the pool before serving.
+	// Earlier versions skipped the pool in servicenow mode (the removed
+	// db.NewPoolIfNeeded), so a servicenow deployment that never had DB
+	// credentials fails here on upgrade — hence the explicit reason in each
+	// message rather than a bare "X is required".
+	const dbAlwaysRequired = "PostgreSQL is required for every DATA_SOURCE, " +
+		"including servicenow (event_publish_failures, sla_clocks, and " +
+		"scheduled_task_run have no ServiceNow equivalent)"
 	if c.DBUser == "" {
-		return fmt.Errorf("DB_USER is required")
+		return fmt.Errorf("DB_USER is required: %s", dbAlwaysRequired)
 	}
 	if c.DBPassword == "" {
-		return fmt.Errorf("DB_PASSWORD is required")
+		return fmt.Errorf("DB_PASSWORD is required: %s", dbAlwaysRequired)
 	}
 	if c.DBName == "" {
-		return fmt.Errorf("DB_NAME is required")
+		return fmt.Errorf("DB_NAME is required: %s", dbAlwaysRequired)
 	}
 	if c.DataSource == DataSourceServiceNow {
 		if c.ServiceNowIntegrationServiceBaseURL == "" {

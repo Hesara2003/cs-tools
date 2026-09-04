@@ -89,6 +89,11 @@ var validEngagementType = map[domain.EngagementType]bool{
 	domain.EngagementTypeOnboarding:            true,
 }
 
+var validEngagementPaymentType = map[domain.EngagementPaymentType]bool{
+	domain.EngagementPaymentTypePaid: true,
+	domain.EngagementPaymentTypeFOC:  true,
+}
+
 var validCaseSortOrder = map[domain.CaseSortOrder]bool{
 	domain.CaseSortOrderAsc:  true,
 	domain.CaseSortOrderDesc: true,
@@ -112,9 +117,9 @@ var validCaseSeverity = map[domain.CaseSeverity]bool{
 	domain.CaseSeverityLow:          true,
 }
 
-// validCaseGroupByField is the allow-list for GroupCasesByRequest.GroupBy,
-// matching openapi.yaml's GroupCasesByRequest.groupBy enum exactly.
-var validCaseGroupByField = map[string]bool{
+// validCaseAggregateField is the allow-list for AggregateCasesRequest.GroupBy,
+// matching openapi.yaml's AggregateCasesRequest.groupBy enum exactly.
+var validCaseAggregateField = map[string]bool{
 	"account":  true,
 	"state":    true,
 	"severity": true,
@@ -154,11 +159,15 @@ func validateCreateCaseRequest(req *domain.CreateCaseRequest) error {
 	if req.ProjectID == "" {
 		return &apierror.ValidationError{Msg: "projectId is required"}
 	}
-	if req.DeploymentID == "" {
-		return &apierror.ValidationError{Msg: "deploymentId is required"}
-	}
-	if req.DeployedProductID == "" {
-		return &apierror.ValidationError{Msg: "deployedProductId is required"}
+	// Announcements have no deployment/deployed-product concept: these fields
+	// are deliberately omitted at the ServiceNow layer, not just optional.
+	if req.Type != "announcement" {
+		if req.DeploymentID == "" {
+			return &apierror.ValidationError{Msg: "deploymentId is required"}
+		}
+		if req.DeployedProductID == "" {
+			return &apierror.ValidationError{Msg: "deployedProductId is required"}
+		}
 	}
 
 	switch req.Type {
@@ -214,18 +223,16 @@ func validateCreateCaseRequest(req *domain.CreateCaseRequest) error {
 		if !validEngagementType[req.EngagementType] {
 			return &apierror.ValidationError{Msg: "engagementType contains invalid value: " + string(req.EngagementType)}
 		}
+		if !validEngagementPaymentType[req.EngagementPaymentType] {
+			return &apierror.ValidationError{Msg: "engagementPaymentType contains invalid value: " + string(req.EngagementPaymentType)}
+		}
 	case "announcement":
-		// "announcement" is a real, valid case type (it's in the Postgres
-		// case_type_enum and is a legitimate case-search/stats filter value —
-		// see validCaseType), but nothing in this codebase knows how to build
-		// an announcement case: this switch has no field-requirement case for
-		// it, and sn_case_service.go's payload-building switch has no case
-		// for it either (so req.Subject/req.Description would be silently
-		// dropped rather than sent to ServiceNow, with no error). Reject
-		// explicitly here rather than letting it fall through and appear to
-		// succeed — remove this case only once both switches gain real
-		// support for creating one.
-		return &apierror.ValidationError{Msg: "case creation for type \"announcement\" is not supported"}
+		if req.Subject == "" {
+			return &apierror.ValidationError{Msg: "subject is required for announcement"}
+		}
+		if req.Description == "" {
+			return &apierror.ValidationError{Msg: "description is required for announcement"}
+		}
 	}
 
 	return nil
@@ -361,11 +368,13 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
 		return domain.UpdateCaseResponse{}, err
 	}
-	if len(req.WatchList) > 0 || req.AssigneeEmail != nil ||
+	if req.WatchList != nil || req.AssigneeEmail != nil ||
 		req.RelatedCaseID != nil || req.ParentID != nil || req.AutocloseHoldUntil != nil ||
 		req.Subject != nil || req.Description != nil || req.DeploymentID != nil || req.DeployedProductID != nil ||
-		req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil {
-		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "watchList, assigneeEmail, relatedCaseId, parentId, autocloseHoldUntil, subject, description, deploymentId, deployedProductId, bestCaseFixEta, mostLikelyFixEta, and worstCaseFixEta are only supported for the ServiceNow data source"}
+		req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil ||
+		req.Type != nil || req.EngagementType != nil || req.CatalogID != nil ||
+		req.CatalogItemID != nil || len(req.Variables) > 0 {
+		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "watchList, assigneeEmail, relatedCaseId, parentId, autocloseHoldUntil, subject, description, deploymentId, deployedProductId, bestCaseFixEta, mostLikelyFixEta, worstCaseFixEta, type, engagementType, catalogId, catalogItemId, and variables are only supported for the ServiceNow data source"}
 	}
 	fieldCount := 0
 	if req.State != nil {
@@ -546,6 +555,12 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 	if parsed.HasActiveEscalation != nil {
 		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: `field "escalation" is not supported by this data source`}
 	}
+	if parsed.HasBreachedSLA != nil {
+		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: `field "slaBreached" is not supported by this data source`}
+	}
+	if parsed.HasActiveAccountEscalation != nil {
+		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: `field "accountEscalationActive" is not supported by this data source`}
+	}
 	if len(req.Filters.AnyOf) > 0 {
 		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: "anyOf is not supported by this data source"}
 	}
@@ -579,8 +594,8 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 	}, nil
 }
 
-func (s *caseService) GroupCasesBy(_ context.Context, _ domain.GroupCasesByRequest) (domain.GroupByResponse, error) {
-	return domain.GroupByResponse{}, &apierror.ServiceUnavailableError{Msg: "groupBy is only supported for the ServiceNow data source"}
+func (s *caseService) AggregateCases(_ context.Context, _ domain.AggregateCasesRequest) (domain.AggregateResponse, error) {
+	return domain.AggregateResponse{}, &apierror.ServiceUnavailableError{Msg: "groupBy is only supported for the ServiceNow data source"}
 }
 
 // resolveActor authenticates the caller from the x-user-id-token header
@@ -790,6 +805,10 @@ func (s *caseService) DeleteCaseAttachment(ctx context.Context, req domain.Delet
 	return domain.DeleteAttachmentResponse{Message: "Attachment deleted successfully"}, nil
 }
 
+func (s *caseService) GetAttachment(_ context.Context, _ string) (domain.Attachment, error) {
+	return domain.Attachment{}, &apierror.ServiceUnavailableError{Msg: "attachments are only supported for the ServiceNow data source"}
+}
+
 func (s *caseService) AddCaseTag(_ context.Context, _, _ string) (domain.Tag, error) {
 	return domain.Tag{}, &apierror.ServiceUnavailableError{Msg: "case tags are only supported for the ServiceNow data source"}
 }
@@ -802,8 +821,8 @@ func (s *caseService) SearchTags(_ context.Context, _ domain.SearchTagsRequest) 
 	return nil, &apierror.ServiceUnavailableError{Msg: "case tags are only supported for the ServiceNow data source"}
 }
 
-func (s *caseService) GetCaseFeedback(_ context.Context, _ string) (domain.CaseFeedback, error) {
-	return domain.CaseFeedback{}, &apierror.ServiceUnavailableError{Msg: "case feedback is only supported for the ServiceNow data source"}
+func (s *caseService) GetCaseFeedback(_ context.Context, _ string) (domain.CaseEmojiFeedback, error) {
+	return domain.CaseEmojiFeedback{}, &apierror.ServiceUnavailableError{Msg: "case feedback is only supported for the ServiceNow data source"}
 }
 
 func (s *caseService) SubmitCaseFeedback(_ context.Context, _ string, _ domain.SubmitCaseFeedbackRequest) (domain.SubmitCaseFeedbackResponse, error) {
@@ -870,7 +889,7 @@ func validatePGAttachmentUpdate(req domain.UpdateAttachmentRequest) error {
 // ServiceNow path allows for reference type "case" (name required,
 // description forbidden).
 func (s *caseService) UpdateAttachment(ctx context.Context, req domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error) {
-	if err := validateUUIDs("id", []string{req.ID}); err != nil {
+	if err := validateUUIDs("id", []string{req.AttachmentID}); err != nil {
 		return domain.UpdateAttachmentResponse{}, err
 	}
 	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
@@ -885,7 +904,7 @@ func (s *caseService) UpdateAttachment(ctx context.Context, req domain.UpdateAtt
 		return domain.UpdateAttachmentResponse{}, err
 	}
 
-	updatedOn, err := s.repo.UpdateCaseAttachmentName(ctx, req.ID, strings.TrimSpace(*req.Name), user.ID)
+	updatedOn, err := s.repo.UpdateCaseAttachmentName(ctx, req.AttachmentID, strings.TrimSpace(*req.Name), user.ID)
 	if err != nil {
 		return domain.UpdateAttachmentResponse{}, err
 	}
@@ -893,7 +912,7 @@ func (s *caseService) UpdateAttachment(ctx context.Context, req domain.UpdateAtt
 	return domain.UpdateAttachmentResponse{
 		Message: "Attachment updated successfully",
 		Attachment: domain.UpdatedAttachment{
-			ID:        req.ID,
+			ID:        req.AttachmentID,
 			UpdatedOn: updatedOn,
 			UpdatedBy: user.Email,
 		},

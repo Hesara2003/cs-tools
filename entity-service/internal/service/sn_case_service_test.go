@@ -598,7 +598,411 @@ func TestSNCaseService_UpdateCase_NewSingleFieldVariants(t *testing.T) {
 	}
 }
 
-// jsonEqual compares two decoded-JSON values (bool/string/number) for equality.
+// --- UpdateCase: type transfer ---
+
+func TestSNCaseService_UpdateCase_TypeTransfer_ValidationErrors(t *testing.T) {
+	strPtr := func(s string) *string { return &s }
+	engagement := domain.EngagementTypeMigration
+	paymentType := domain.EngagementPaymentTypePaid
+	severity := domain.CaseSeverityHigh
+
+	tests := []struct {
+		name string
+		req  domain.UpdateCaseRequest
+	}{
+		{
+			name: "type contains an invalid value",
+			req:  domain.UpdateCaseRequest{ID: testDeploymentUUID, Type: strPtr("hosting")},
+		},
+		{
+			name: "engagement without engagementType",
+			req:  domain.UpdateCaseRequest{ID: testDeploymentUUID, Type: strPtr("engagement")},
+		},
+		{
+			name: "engagement without engagementPaymentType",
+			req: domain.UpdateCaseRequest{
+				ID: testDeploymentUUID, Type: strPtr("engagement"), EngagementType: &engagement,
+			},
+		},
+		{
+			name: "service_request without catalogId/catalogItemId",
+			req:  domain.UpdateCaseRequest{ID: testDeploymentUUID, Type: strPtr("service_request")},
+		},
+		{
+			name: "engagementType supplied without type",
+			req:  domain.UpdateCaseRequest{ID: testDeploymentUUID, EngagementType: &engagement},
+		},
+		{
+			name: "engagementPaymentType supplied without type",
+			req:  domain.UpdateCaseRequest{ID: testDeploymentUUID, EngagementPaymentType: &paymentType},
+		},
+		{
+			name: "catalogId supplied without type",
+			req:  domain.UpdateCaseRequest{ID: testDeploymentUUID, CatalogID: strPtr(testDeploymentUUID)},
+		},
+		{
+			name: "engagementType supplied with type \"case\"",
+			req: domain.UpdateCaseRequest{
+				ID: testDeploymentUUID, Type: strPtr("case"), EngagementType: &engagement,
+			},
+		},
+		{
+			name: "engagementPaymentType supplied with type \"case\"",
+			req: domain.UpdateCaseRequest{
+				ID: testDeploymentUUID, Type: strPtr("case"), EngagementPaymentType: &paymentType,
+			},
+		},
+		{
+			name: "catalogId supplied with type \"engagement\"",
+			req: domain.UpdateCaseRequest{
+				ID: testDeploymentUUID, Type: strPtr("engagement"), EngagementType: &engagement,
+				EngagementPaymentType: &paymentType,
+				CatalogID:             strPtr(testDeploymentUUID),
+			},
+		},
+		{
+			name: "engagementType supplied with type \"service_request\"",
+			req: domain.UpdateCaseRequest{
+				ID: testDeploymentUUID, Type: strPtr("service_request"), EngagementType: &engagement,
+				CatalogID: strPtr(testDeploymentUUID), CatalogItemID: strPtr(testDeploymentUUID),
+			},
+		},
+		{
+			name: "engagementPaymentType supplied with type \"service_request\"",
+			req: domain.UpdateCaseRequest{
+				ID: testDeploymentUUID, Type: strPtr("service_request"), EngagementPaymentType: &paymentType,
+				CatalogID: strPtr(testDeploymentUUID), CatalogItemID: strPtr(testDeploymentUUID),
+			},
+		},
+		{
+			name: "type combined with severity",
+			req: domain.UpdateCaseRequest{
+				ID: testDeploymentUUID, Type: strPtr("case"), Severity: &severity,
+			},
+		},
+		{
+			// A bare product/publicTicket with no fix-ETA date has nowhere to
+			// go -- addPublicComment's own handling only runs when
+			// addPublicComment itself is set, so without this rejection the
+			// field would otherwise be silently dropped rather than erroring.
+			name: "type combined with a bare product (no fix-ETA date, no addPublicComment)",
+			req: domain.UpdateCaseRequest{
+				ID: testDeploymentUUID, Type: strPtr("case"), Product: strPtr("API Manager"),
+			},
+		},
+		{
+			// Standalone (no other field at all) -- addPublicComment's own
+			// handling never runs without addPublicComment itself present, so
+			// product/publicTicket would otherwise be silently dropped rather
+			// than erroring or being forwarded.
+			name: "standalone product with no addPublicComment",
+			req:  domain.UpdateCaseRequest{ID: testDeploymentUUID, Product: strPtr("API Manager")},
+		},
+		{
+			name: "standalone publicTicket with no addPublicComment",
+			req:  domain.UpdateCaseRequest{ID: testDeploymentUUID, PublicTicket: strPtr("GH-123")},
+		},
+	}
+
+	svc := NewServiceNowCaseService(nil, nil, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.UpdateCase(contextWithUserIDToken("token"), tt.req)
+			if _, ok := err.(*apierror.ValidationError); !ok {
+				t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
+func TestSNCaseService_UpdateCase_TypeTransfer_Case(t *testing.T) {
+	typ := "case"
+	sev := domain.CaseSeverityLow
+	issue := domain.CaseIssueTypeQuestion
+	var gotBody map[string]any
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"message": "Case updated successfully.",
+			"case": {
+				"id": "` + testWLCaseSysid + `",
+				"updatedOn": "2026-01-02 10:00:00",
+				"updatedBy": "engineer@example.com",
+				"type": {"id": "8d4b87bd1b18f010cb6898aebd4bcb59", "name": "Case"}
+			}
+		}`))
+	})
+
+	svc := NewServiceNowCaseService(client, nil, nil)
+	// severity and issueType are both mandatory for this target: the backing data source
+	// selects Incident vs Query from the severity, and stores issue type on those records.
+	resp, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{
+		ID: testDeploymentUUID, Type: &typ, Severity: &sev, IssueType: &issue,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got, ok := gotBody["type"]; !ok || got != "default_case" {
+		t.Fatalf("expected type %q, got %v (body: %+v)", "default_case", got, gotBody)
+	}
+	if got, ok := gotBody["issueTypeKey"]; !ok || got != float64(4) {
+		t.Fatalf("expected issueTypeKey 4 for %q, got %v (body: %+v)", issue, got, gotBody)
+	}
+	if _, ok := gotBody["severityKey"]; !ok {
+		t.Fatalf("expected severityKey to be sent alongside type: %+v", gotBody)
+	}
+	for _, field := range []string{"engagementType", "engagementPaymentType", "catalogId", "catalogItemId", "variables"} {
+		if _, ok := gotBody[field]; ok {
+			t.Fatalf("unexpected extra field %q present in a type: \"case\" payload: %+v", field, gotBody)
+		}
+	}
+	if resp.Case.Type != "case" {
+		t.Fatalf("expected echoed type \"case\", got %q", resp.Case.Type)
+	}
+}
+
+func TestSNCaseService_UpdateCase_TypeTransfer_CaseRequiresSeverityAndIssueType(t *testing.T) {
+	typ := "case"
+	sev := domain.CaseSeverityLow
+	issue := domain.CaseIssueTypeQuestion
+	client := newTestCaseClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("backing service must not be called for an incomplete transfer")
+		w.WriteHeader(http.StatusOK)
+	})
+	svc := NewServiceNowCaseService(client, nil, nil)
+
+	for name, req := range map[string]domain.UpdateCaseRequest{
+		"missing both":      {ID: testDeploymentUUID, Type: &typ},
+		"missing issueType": {ID: testDeploymentUUID, Type: &typ, Severity: &sev},
+		"missing severity":  {ID: testDeploymentUUID, Type: &typ, IssueType: &issue},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := svc.UpdateCase(contextWithUserIDToken("token"), req); err == nil {
+				t.Fatal("expected a validation error, got nil")
+			}
+		})
+	}
+}
+
+func TestSNCaseService_UpdateCase_TypeTransfer_IssueTypeRejectedForOtherTargets(t *testing.T) {
+	issue := domain.CaseIssueTypeQuestion
+	client := newTestCaseClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("backing service must not be called for a mismatched transfer")
+		w.WriteHeader(http.StatusOK)
+	})
+	svc := NewServiceNowCaseService(client, nil, nil)
+
+	for _, typ := range []string{"engagement", "security_report_analysis"} {
+		t.Run(typ, func(t *testing.T) {
+			target := typ
+			if _, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{
+				ID: testDeploymentUUID, Type: &target, IssueType: &issue,
+			}); err == nil {
+				t.Fatalf("expected issueType to be rejected for type %q", typ)
+			}
+		})
+	}
+}
+
+func TestSNCaseService_UpdateCase_IssueTypeWithoutTypeRejected(t *testing.T) {
+	issue := domain.CaseIssueTypeQuestion
+	client := newTestCaseClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("backing service must not be called")
+		w.WriteHeader(http.StatusOK)
+	})
+	svc := NewServiceNowCaseService(client, nil, nil)
+	if _, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{
+		ID: testDeploymentUUID, IssueType: &issue,
+	}); err == nil {
+		t.Fatal("expected issueType alone to be rejected")
+	}
+}
+
+func TestSNCaseService_UpdateCase_TypeTransfer_Engagement(t *testing.T) {
+	typ := "engagement"
+	engagement := domain.EngagementTypeMigration
+	paymentType := domain.EngagementPaymentTypePaid
+	var gotBody map[string]any
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"message": "Case updated successfully.",
+			"case": {"id": "` + testWLCaseSysid + `", "updatedOn": "2026-01-02 10:00:00", "updatedBy": "engineer@example.com"}
+		}`))
+	})
+
+	svc := NewServiceNowCaseService(client, nil, nil)
+	_, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{
+		ID: testDeploymentUUID, Type: &typ, EngagementType: &engagement, EngagementPaymentType: &paymentType,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := gotBody["type"]; got != "engagement" {
+		t.Fatalf("expected type \"engagement\", got %v", got)
+	}
+	if got, ok := gotBody["engagementType"]; !ok || !jsonEqual(got, float64(1)) {
+		t.Fatalf("expected engagementType 1 (migration), got %v (body: %+v)", got, gotBody)
+	}
+	if got, ok := gotBody["engagementPaymentType"]; !ok || !jsonEqual(got, float64(1)) {
+		t.Fatalf("expected engagementPaymentType 1 (paid), got %v (body: %+v)", got, gotBody)
+	}
+}
+
+func TestSNCaseService_UpdateCase_TypeTransfer_SecurityReportAnalysis(t *testing.T) {
+	typ := "security_report_analysis"
+	var gotBody map[string]any
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"message": "Case updated successfully.",
+			"case": {"id": "` + testWLCaseSysid + `", "updatedOn": "2026-01-02 10:00:00", "updatedBy": "engineer@example.com"}
+		}`))
+	})
+
+	svc := NewServiceNowCaseService(client, nil, nil)
+	_, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{
+		ID: testDeploymentUUID, Type: &typ,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := gotBody["type"]; got != "security_report_analysis" {
+		t.Fatalf("expected type \"security_report_analysis\", got %v", got)
+	}
+}
+
+func TestSNCaseService_UpdateCase_TypeTransfer_ServiceRequest(t *testing.T) {
+	typ := "service_request"
+	catalogUUID := "44444444-4444-4444-4444-444444444444"
+	catalogItemUUID := "55555555-5555-5555-5555-555555555555"
+	variableUUID := "66666666-6666-6666-6666-666666666666"
+	var gotBody map[string]any
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"message": "Case updated successfully.",
+			"case": {"id": "` + testWLCaseSysid + `", "updatedOn": "2026-01-02 10:00:00", "updatedBy": "engineer@example.com"}
+		}`))
+	})
+
+	svc := NewServiceNowCaseService(client, nil, nil)
+	_, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{
+		ID:            testDeploymentUUID,
+		Type:          &typ,
+		CatalogID:     &catalogUUID,
+		CatalogItemID: &catalogItemUUID,
+		Variables:     []domain.Variable{{ID: variableUUID, Value: "Scaling for a launch"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := gotBody["type"]; got != "service_request" {
+		t.Fatalf("expected type \"service_request\", got %v", got)
+	}
+	if got, ok := gotBody["catalogId"]; !ok || got != uuidToSysid(catalogUUID) {
+		t.Fatalf("expected catalogId %q, got %v", uuidToSysid(catalogUUID), got)
+	}
+	if got, ok := gotBody["catalogItemId"]; !ok || got != uuidToSysid(catalogItemUUID) {
+		t.Fatalf("expected catalogItemId %q, got %v", uuidToSysid(catalogItemUUID), got)
+	}
+	vars, ok := gotBody["variables"].([]any)
+	if !ok || len(vars) != 1 {
+		t.Fatalf("expected 1 variable, got %+v", gotBody["variables"])
+	}
+	v, ok := vars[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected variables[0] to be an object, got %+v", vars[0])
+	}
+	if got := v["id"]; got != uuidToSysid(variableUUID) {
+		t.Fatalf("expected variables[0].id %q, got %v", uuidToSysid(variableUUID), got)
+	}
+	if got := v["value"]; got != "Scaling for a launch" {
+		t.Fatalf("expected variables[0].value %q, got %v", "Scaling for a launch", got)
+	}
+}
+
+func TestSNCaseService_UpdateCase_TypeTransfer_ServiceRequestRequiresVariables(t *testing.T) {
+	typ := "service_request"
+	catalogUUID := "44444444-4444-4444-4444-444444444444"
+	catalogItemUUID := "55555555-5555-5555-5555-555555555555"
+	client := newTestCaseClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("backing service must not be called when variables are missing")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	svc := NewServiceNowCaseService(client, nil, nil)
+	// The backing data source requires at least one variable for a service request, exactly as
+	// it does at create time. A transfer with none would be rejected downstream, so reject it
+	// here rather than spending the round-trip.
+	if _, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{
+		ID: testDeploymentUUID, Type: &typ, CatalogID: &catalogUUID, CatalogItemID: &catalogItemUUID,
+	}); err == nil {
+		t.Fatal("expected a validation error when variables are omitted")
+	}
+}
+
+func TestSNCaseService_UpdateCase_TypeTransfer_SeverityRejectedForOtherTargets(t *testing.T) {
+	sev := domain.CaseSeverityHigh
+	engagement := domain.EngagementTypeMigration
+	paymentType := domain.EngagementPaymentTypePaid
+	catalogUUID := "44444444-4444-4444-4444-444444444444"
+	catalogItemUUID := "55555555-5555-5555-5555-555555555555"
+	variableUUID := "66666666-6666-6666-6666-666666666666"
+	client := newTestCaseClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("backing service must not be called for a mismatched transfer")
+		w.WriteHeader(http.StatusOK)
+	})
+	svc := NewServiceNowCaseService(client, nil, nil)
+
+	tests := []struct {
+		name string
+		req  domain.UpdateCaseRequest
+	}{
+		{
+			name: "engagement",
+			req: domain.UpdateCaseRequest{
+				ID: testDeploymentUUID, Type: strPtr("engagement"), EngagementType: &engagement,
+				EngagementPaymentType: &paymentType, Severity: &sev,
+			},
+		},
+		{
+			name: "service_request",
+			req: domain.UpdateCaseRequest{
+				ID: testDeploymentUUID, Type: strPtr("service_request"),
+				CatalogID: &catalogUUID, CatalogItemID: &catalogItemUUID,
+				Variables: []domain.Variable{{ID: variableUUID, Value: "Scaling for a launch"}},
+				Severity:  &sev,
+			},
+		},
+		{
+			name: "security_report_analysis",
+			req: domain.UpdateCaseRequest{
+				ID: testDeploymentUUID, Type: strPtr("security_report_analysis"), Severity: &sev,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := svc.UpdateCase(contextWithUserIDToken("token"), tt.req); err == nil {
+				t.Fatalf("expected severity to be rejected for type %q", tt.name)
+			}
+		})
+	}
+}
+
 func jsonEqual(got, want any) bool {
 	switch w := want.(type) {
 	case bool:
@@ -1128,6 +1532,8 @@ func TestSNCaseService_SearchCases_GenericFiltersTranslateToSNPayload(t *testing
 				{Field: "resolutionNotes", Op: "isEmpty"},
 				{Field: "createdBy", Op: "eq", Values: []string{currentUserFilterPlaceholder}},
 				{Field: "projectType", Op: "in", Values: []string{"Subscription", "Free Trial"}},
+				{Field: "slaBreached", Op: "eq", Values: []string{"true"}},
+				{Field: "accountEscalationActive", Op: "eq", Values: []string{"true"}},
 			},
 		},
 	}
@@ -1161,6 +1567,70 @@ func TestSNCaseService_SearchCases_GenericFiltersTranslateToSNPayload(t *testing
 		gotBody.Filters.ProjectTypeNames[0] != "Subscription" ||
 		gotBody.Filters.ProjectTypeNames[1] != "Free Trial" {
 		t.Fatalf("ProjectTypeNames = %v, want [Subscription, Free Trial] passed through unchanged", gotBody.Filters.ProjectTypeNames)
+	}
+	if gotBody.Filters.SlaBreached == nil || !*gotBody.Filters.SlaBreached {
+		t.Fatalf("SlaBreached = %v, want pointer to true", gotBody.Filters.SlaBreached)
+	}
+	if gotBody.Filters.AccountEscalationActive == nil || !*gotBody.Filters.AccountEscalationActive {
+		t.Fatalf("AccountEscalationActive = %v, want pointer to true", gotBody.Filters.AccountEscalationActive)
+	}
+}
+
+// TestSNCaseService_SearchCases_SLABreachedAndAccountEscalationTravelOnTheirOwnWireKeys
+// pins the exact JSON wire keys for the two new plain-boolean filters --
+// "slaBreached" and "accountEscalationActive" -- distinct from the existing
+// case-level "isEscalated" key, and proves an explicit false is still sent on
+// the wire (not dropped by omitempty, since both fields are *bool).
+func TestSNCaseService_SearchCases_SLABreachedAndAccountEscalationTravelOnTheirOwnWireKeys(t *testing.T) {
+	var rawBody []byte
+	mux := http.NewServeMux()
+	mux.HandleFunc("/cases/search", func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		rawBody = b
+		_ = json.NewEncoder(w).Encode(map[string]any{"cases": []map[string]any{}, "total": 0, "offset": 0, "limit": 20})
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowCaseService(client, nil, nil)
+
+	req := domain.SearchCasesRequest{
+		Filters: domain.SearchCasesFilters{
+			Filters: []domain.CaseFieldFilter{
+				{Field: "slaBreached", Op: "eq", Values: []string{"false"}},
+				{Field: "accountEscalationActive", Op: "eq", Values: []string{"false"}},
+			},
+		},
+	}
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	if _, err := svc.SearchCases(ctx, req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var envelope struct {
+		Filters map[string]json.RawMessage `json:"filters"`
+	}
+	if err := json.Unmarshal(rawBody, &envelope); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+	slaBreachedRaw, ok := envelope.Filters["slaBreached"]
+	if !ok {
+		t.Fatalf("expected \"slaBreached\" key on the wire even for an explicit false, filters = %v", envelope.Filters)
+	}
+	if string(slaBreachedRaw) != "false" {
+		t.Fatalf("slaBreached = %s, want false", slaBreachedRaw)
+	}
+	accountEscalationRaw, ok := envelope.Filters["accountEscalationActive"]
+	if !ok {
+		t.Fatalf("expected \"accountEscalationActive\" key on the wire even for an explicit false, filters = %v", envelope.Filters)
+	}
+	if string(accountEscalationRaw) != "false" {
+		t.Fatalf("accountEscalationActive = %s, want false", accountEscalationRaw)
+	}
+	if _, ok := envelope.Filters["isEscalated"]; ok {
+		t.Fatalf("expected no \"isEscalated\" key: accountEscalationActive must not be conflated with the case-level escalation filter")
 	}
 }
 
@@ -1501,6 +1971,84 @@ func TestSNCaseService_SearchCases_AnyOfKeepsSNOrGroupsWireFormat(t *testing.T) 
 	levels, ok := second["escalationLevel"].([]any)
 	if !ok || len(levels) != 1 || levels[0] != "3" {
 		t.Fatalf("orGroups[1].escalationLevel = %v, want [\"3\"]: %s", second["escalationLevel"], rawBody)
+	}
+}
+
+// TestSNCaseService_SearchCases_AnyOfBranchTagsFlowToSNOrGroups proves tag /
+// excludeTags are now accepted inside an anyOf branch (the Go-side rejection
+// was removed once ServiceNow's CaseUtils gained orGroups[].tags/excludeTags
+// support) and that the values reach the SN payload's "orGroups" entries
+// under the same "tags"/"excludeTags" keys the top-level filters object uses,
+// nested one level into the branch object.
+func TestSNCaseService_SearchCases_AnyOfBranchTagsFlowToSNOrGroups(t *testing.T) {
+	var rawBody []byte
+	mux := http.NewServeMux()
+	mux.HandleFunc("/cases/search", func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		rawBody = b
+		_ = json.NewEncoder(w).Encode(map[string]any{"cases": []map[string]any{}, "total": 0, "offset": 0, "limit": 20})
+	})
+
+	client := newTestSNClient(t, mux)
+	svc := NewServiceNowCaseService(client, nil, nil)
+
+	req := domain.SearchCasesRequest{
+		Filters: domain.SearchCasesFilters{
+			AnyOf: []domain.CaseFilterBranch{
+				{Filters: []domain.CaseFieldFilter{
+					{Field: "type", Op: "in", Values: []string{"engagement"}},
+					{Field: "tag", Op: "in", Values: []string{"migration"}},
+				}},
+				{Filters: []domain.CaseFieldFilter{
+					{Field: "type", Op: "in", Values: []string{"security_report_analysis"}},
+					{Field: "tag", Op: "in", Values: []string{"s_migration"}},
+					{Field: "tag", Op: "notIn", Values: []string{"archived"}},
+				}},
+			},
+		},
+	}
+
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	if _, err := svc.SearchCases(ctx, req); err != nil {
+		t.Fatalf("unexpected error: %v (tag/excludeTags must be accepted inside an anyOf branch)", err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		t.Fatalf("unmarshal raw request body: %v (body=%s)", err, rawBody)
+	}
+	filters, ok := body["filters"].(map[string]any)
+	if !ok {
+		t.Fatalf("request body has no filters object: %s", rawBody)
+	}
+	groups, ok := filters["orGroups"].([]any)
+	if !ok || len(groups) != 2 {
+		t.Fatalf("orGroups = %v, want 2 entries: %s", filters["orGroups"], rawBody)
+	}
+
+	first, ok := groups[0].(map[string]any)
+	if !ok {
+		t.Fatalf("orGroups[0] is not an object: %s", rawBody)
+	}
+	tags, ok := first["tags"].([]any)
+	if !ok || len(tags) != 1 || tags[0] != "migration" {
+		t.Fatalf("orGroups[0].tags = %v, want [\"migration\"]: %s", first["tags"], rawBody)
+	}
+
+	second, ok := groups[1].(map[string]any)
+	if !ok {
+		t.Fatalf("orGroups[1] is not an object: %s", rawBody)
+	}
+	sTags, ok := second["tags"].([]any)
+	if !ok || len(sTags) != 1 || sTags[0] != "s_migration" {
+		t.Fatalf("orGroups[1].tags = %v, want [\"s_migration\"]: %s", second["tags"], rawBody)
+	}
+	excludeTags, ok := second["excludeTags"].([]any)
+	if !ok || len(excludeTags) != 1 || excludeTags[0] != "archived" {
+		t.Fatalf("orGroups[1].excludeTags = %v, want [\"archived\"]: %s", second["excludeTags"], rawBody)
 	}
 }
 
