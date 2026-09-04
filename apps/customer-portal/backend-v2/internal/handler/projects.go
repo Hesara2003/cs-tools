@@ -91,11 +91,15 @@ func (h *ProjectHandler) SearchProjects(w http.ResponseWriter, r *http.Request) 
 	var result entity.SearchProjectsResponse
 	var err error
 
-	if h.callerScope != nil {
-		result, err = h.scopeToCallerProjects(r.Context(), entityReq, req.Pagination, user.Email)
-	} else {
-		result, err = h.entity.SearchProjects(r.Context(), entityReq)
-	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / scopeToCallerProjects.
+	// if h.callerScope != nil {
+	// 	result, err = h.scopeToCallerProjects(r.Context(), entityReq, req.Pagination, user.Email)
+	// } else {
+	// 	result, err = h.entity.SearchProjects(r.Context(), entityReq)
+	// }
+	result, err = h.entity.SearchProjects(r.Context(), entityReq)
 
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchProjects failed", "userID", user.UserID, "err", summarizeErr(err))

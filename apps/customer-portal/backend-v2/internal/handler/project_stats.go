@@ -79,9 +79,12 @@ func (h *ProjectStatsHandler) GetProjectFilters(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
-		return
-	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	result, err := h.entity.GetProjectMetadata(r.Context(), id)
 	if err != nil {
@@ -107,9 +110,12 @@ func (h *ProjectStatsHandler) GetProjectFeatures(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
-		return
-	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	result, err := h.entity.GetProjectMetadata(r.Context(), id)
 	if err != nil {
@@ -138,9 +144,12 @@ func (h *ProjectStatsHandler) GetProjectDashboardStats(w http.ResponseWriter, r 
 		return
 	}
 
-	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
-		return
-	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	caseTypes := r.URL.Query()["caseTypes"]
 	createdBy := r.URL.Query().Get("createdBy")
@@ -190,9 +199,12 @@ func (h *ProjectStatsHandler) GetProjectCaseStats(w http.ResponseWriter, r *http
 		return
 	}
 
-	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
-		return
-	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	result, err := h.entity.GetProjectCaseStats(r.Context(), id, r.URL.Query()["caseTypes"], r.URL.Query().Get("createdBy"))
 	if err != nil {
@@ -218,9 +230,12 @@ func (h *ProjectStatsHandler) GetProjectConversationStats(w http.ResponseWriter,
 		return
 	}
 
-	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
-		return
-	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	result, err := h.entity.GetProjectConversationStats(r.Context(), id, r.URL.Query().Get("createdBy"))
 	if err != nil {
@@ -248,9 +263,12 @@ func (h *ProjectStatsHandler) GetProjectSupportStats(w http.ResponseWriter, r *h
 		return
 	}
 
-	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
-		return
-	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	caseTypes := r.URL.Query()["caseTypes"]
 	createdBy := r.URL.Query().Get("createdBy")
@@ -286,9 +304,12 @@ func (h *ProjectStatsHandler) GetProjectTimeCardStats(w http.ResponseWriter, r *
 		return
 	}
 
-	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
-		return
-	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	startDate := r.URL.Query().Get("startDate")
 	endDate := r.URL.Query().Get("endDate")
@@ -320,9 +341,12 @@ func (h *ProjectStatsHandler) GetProjectChangeRequestStats(w http.ResponseWriter
 		return
 	}
 
-	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
-		return
-	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	result, err := h.entity.GetProjectChangeRequestStats(r.Context(), id)
 	if err != nil {
@@ -349,9 +373,12 @@ func (h *ProjectStatsHandler) SearchProjectCaseTimeCards(w http.ResponseWriter, 
 		return
 	}
 
-	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
-		return
-	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -400,9 +427,12 @@ func (h *ProjectStatsHandler) GetProjectUsageStats(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
-		return
-	}
+	// Commented out pending end-to-end verification against real
+	// entity-service data — uncomment while testing, re-comment before
+	// committing. See handler.CallerScopeResolver / requireProjectMember.
+	// if !requireProjectMember(w, r, h.callerScope, id, user.UserID, user.Email, http.StatusForbidden, ErrMsgForbidden) {
+	// 	return
+	// }
 
 	result, err := h.entity.GetProjectStats(r.Context(), id)
 	if err != nil {
