@@ -217,7 +217,11 @@ func (h *AIChatHandler) GetConversationMessages(w http.ResponseWriter, r *http.R
 		mapUpstreamError(w, err, "Failed to retrieve conversation messages.")
 		return
 	}
-	if conv.Project != nil && !requireProjectMember(w, r, h.callerScope, conv.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	if conv.Project == nil {
+		writeError(w, http.StatusNotFound, ErrMsgNotFound)
+		return
+	}
+	if !requireProjectMember(w, r, h.callerScope, conv.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
 		return
 	}
 
@@ -388,6 +392,17 @@ func (h *AIChatHandler) SendConversationMessage(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	conv, err := h.entity.GetConversation(r.Context(), conversationID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetConversation failed", "userID", user.UserID, "conversationID", conversationID, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to process conversation message.")
+		return
+	}
+	if conv.Project == nil || conv.Project.ID != projectID {
+		writeError(w, http.StatusNotFound, ErrMsgNotFound)
+		return
+	}
+
 	body, ok := readJSONBody(w, r)
 	if !ok {
 		return
@@ -477,7 +492,11 @@ func (h *AIChatHandler) GetConversation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if result.Project != nil && !requireProjectMember(w, r, h.callerScope, result.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	if result.Project == nil {
+		writeError(w, http.StatusNotFound, ErrMsgNotFound)
+		return
+	}
+	if !requireProjectMember(w, r, h.callerScope, result.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
 		return
 	}
 
@@ -510,7 +529,11 @@ func (h *AIChatHandler) UpdateConversation(w http.ResponseWriter, r *http.Reques
 		mapUpstreamError(w, err, "Failed to update conversation.")
 		return
 	}
-	if conv.Project != nil && !requireProjectMember(w, r, h.callerScope, conv.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
+	if conv.Project == nil {
+		writeError(w, http.StatusNotFound, ErrMsgNotFound)
+		return
+	}
+	if !requireProjectMember(w, r, h.callerScope, conv.Project.ID, user.UserID, user.Email, http.StatusNotFound, ErrMsgNotFound) {
 		return
 	}
 
