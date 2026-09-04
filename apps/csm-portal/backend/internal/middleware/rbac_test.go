@@ -223,7 +223,7 @@ func TestRequireRoles(t *testing.T) {
 		resolver := &staticRoleResolver{roles: []string{"timecard_approver"}}
 		handler := RequireRoles(resolver, "admin", "timecard_approver")(dummyHandler)
 
-		req := httptest.NewRequest(http.MethodPatch, "/time-cards/123", nil)
+		req := httptest.NewRequest(http.MethodPatch, "/time-cards/11111111-1111-1111-1111-111111111111", nil)
 		req = req.WithContext(WithUserInfo(req.Context(), &UserInfo{UserID: "u1"}))
 		rec := httptest.NewRecorder()
 
