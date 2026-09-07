@@ -208,17 +208,21 @@ func main() {
 	mux.HandleFunc("POST /updates/levels/search", updatesHandler.SearchUpdatesBetweenUpdateLevels)
 	mux.HandleFunc("GET /users/me", usersHandler.GetMe)
 	mux.HandleFunc("PATCH /users/me", usersHandler.PatchMe)
-	// The directory surface (users/roles/teams/groups) backs the webapp's
-	// admin section and the engineer picker dialogs (assignee, assignment group,
-	// approvers). Gating on "agent", "admin" restricts directory search to internal
-	// staff with operational/admin roles while allowing dialog pickers to work.
+	// POST /users/search backs the webapp's admin section and the engineer
+	// picker dialogs (assignee, approvers). Gating on "agent", "admin" restricts
+	// directory search to internal staff with operational/admin roles while
+	// allowing dialog pickers to work.
 	mux.Handle("POST /users/search", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(usersHandler.SearchUsers)))
 	// GET /users/{id} is deliberately open to every authenticated caller so CS
 	// engineers can open linked person profiles from a case — see the commit
 	// that reopened it after the initial RBAC pass.
 	mux.HandleFunc("GET /users/{id}", usersHandler.GetUser)
-	mux.Handle("POST /roles/search", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(referenceHandler.SearchRoles)))
-	mux.Handle("POST /teams/search", middleware.RequireRoles(roleResolver, "agent", "admin")(http.HandlerFunc(referenceHandler.SearchTeams)))
+	// POST /roles/search and POST /teams/search are served entirely in-process
+	// from internal/directory at startup and make no upstream call (see CLAUDE.md).
+	// They remain open to all authenticated callers to avoid coupling local in-memory
+	// catalogues to upstream role resolution.
+	mux.HandleFunc("POST /roles/search", referenceHandler.SearchRoles)
+	mux.HandleFunc("POST /teams/search", referenceHandler.SearchTeams)
 	mux.HandleFunc("GET /accounts/{id}", accountHandler.GetAccount)
 	mux.HandleFunc("POST /accounts/search", accountHandler.SearchAccounts)
 	mux.HandleFunc("POST /accounts/{id}/contacts/search", accountHandler.SearchAccountContacts)
