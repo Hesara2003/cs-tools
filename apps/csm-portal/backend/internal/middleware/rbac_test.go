@@ -234,3 +234,96 @@ func TestRequireRoles(t *testing.T) {
 		}
 	})
 }
+
+func TestRequireRoles_Combinations(t *testing.T) {
+	dummyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	tests := []struct {
+		name         string
+		userRoles    []string
+		allowedRoles []string
+		wantStatus   int
+	}{
+		{
+			name:         "agent allowed on operational write",
+			userRoles:    []string{"agent"},
+			allowedRoles: []string{"agent", "admin"},
+			wantStatus:   http.StatusOK,
+		},
+		{
+			name:         "admin allowed on operational write",
+			userRoles:    []string{"admin"},
+			allowedRoles: []string{"agent", "admin"},
+			wantStatus:   http.StatusOK,
+		},
+		{
+			name:         "internal staff rejected on operational write",
+			userRoles:    []string{"internal"},
+			allowedRoles: []string{"agent", "admin"},
+			wantStatus:   http.StatusForbidden,
+		},
+		{
+			name:         "commenter rejected on operational write",
+			userRoles:    []string{"commenter"},
+			allowedRoles: []string{"agent", "admin"},
+			wantStatus:   http.StatusForbidden,
+		},
+		{
+			name:         "customer rejected on operational write",
+			userRoles:    []string{"customer"},
+			allowedRoles: []string{"agent", "admin"},
+			wantStatus:   http.StatusForbidden,
+		},
+		{
+			name:         "timecard_approver rejected on operational write",
+			userRoles:    []string{"timecard_approver"},
+			allowedRoles: []string{"agent", "admin"},
+			wantStatus:   http.StatusForbidden,
+		},
+		{
+			name:         "agent allowed on timecard update and delete",
+			userRoles:    []string{"agent"},
+			allowedRoles: []string{"agent", "timecard_approver", "admin"},
+			wantStatus:   http.StatusOK,
+		},
+		{
+			name:         "timecard_approver allowed on timecard update and delete",
+			userRoles:    []string{"timecard_approver"},
+			allowedRoles: []string{"agent", "timecard_approver", "admin"},
+			wantStatus:   http.StatusOK,
+		},
+		{
+			name:         "admin allowed on timecard update and delete",
+			userRoles:    []string{"admin"},
+			allowedRoles: []string{"agent", "timecard_approver", "admin"},
+			wantStatus:   http.StatusOK,
+		},
+		{
+			name:         "internal staff rejected on timecard update and delete",
+			userRoles:    []string{"internal"},
+			allowedRoles: []string{"agent", "timecard_approver", "admin"},
+			wantStatus:   http.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := &staticRoleResolver{roles: tt.userRoles}
+			handler := RequireRoles(resolver, tt.allowedRoles...)(dummyHandler)
+
+			req := httptest.NewRequest(http.MethodPost, "/test", nil)
+			req = req.WithContext(WithUserInfo(req.Context(), &UserInfo{UserID: "u-test"}))
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("RequireRoles() status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+		})
+	}
+}
+
