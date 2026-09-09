@@ -56,3 +56,41 @@ func TestIsAttachmentID(t *testing.T) {
 		}
 	}
 }
+
+func TestToSysID(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"26051dbc-3baa-8f50-9140-4c6aa5e45a1c", "26051dbc3baa8f5091404c6aa5e45a1c"},
+		{"26051DBC-3BAA-8F50-9140-4C6AA5E45A1C", "26051dbc3baa8f5091404c6aa5e45a1c"},
+		{"26051dbc3baa8f5091404c6aa5e45a1c", "26051dbc3baa8f5091404c6aa5e45a1c"},
+	}
+	for _, tc := range cases {
+		if got := toSysID(tc.in); got != tc.want {
+			t.Errorf("toSysID(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestIsUUIDOrSysID(t *testing.T) {
+	cases := map[string]struct {
+		id   string
+		want bool
+	}{
+		"valid uuid":      {"26051dbc-3baa-8f50-9140-4c6aa5e45a1c", true},
+		"valid sysid":     {"26051dbc3baa8f5091404c6aa5e45a1c", true},
+		"uppercase sysid": {"26051DBC3BAA8F5091404C6AA5E45A1C", true},
+		"empty":           {"", false},
+		"malformed":       {"not-a-valid-id", false},
+		"short hex":       {"26051dbc", false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := isUUIDOrSysID(tc.id); got != tc.want {
+				t.Errorf("isUUIDOrSysID(%q) = %v, want %v", tc.id, got, tc.want)
+			}
+		})
+	}
+}
+
