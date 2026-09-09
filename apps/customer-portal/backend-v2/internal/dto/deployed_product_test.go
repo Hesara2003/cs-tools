@@ -227,3 +227,59 @@ func TestBuildEntityUpdateDeployedProductRequest(t *testing.T) {
 		t.Errorf("got DeploymentID = %v, want 2e8431b11b8c03100bb3da47b04bcba6", got.DeploymentID)
 	}
 }
+
+func TestDeployedProductDecoders_PropagateTimestampErrors(t *testing.T) {
+	t.Run("invalid createdOn in DeployedProductView returns error", func(t *testing.T) {
+		raw := `{"id":"1","createdOn":"invalid-time","updatedOn":"2024-01-01"}`
+		var dp entity.DeployedProductView
+		if err := json.Unmarshal([]byte(raw), &dp); err == nil {
+			t.Error("expected error unmarshaling malformed createdOn, got nil")
+		}
+	})
+
+	t.Run("invalid updatedOn in DeployedProductView returns error", func(t *testing.T) {
+		raw := `{"id":"1","createdOn":"2024-01-01","updatedOn":"invalid-time"}`
+		var dp entity.DeployedProductView
+		if err := json.Unmarshal([]byte(raw), &dp); err == nil {
+			t.Error("expected error unmarshaling malformed updatedOn, got nil")
+		}
+	})
+
+	t.Run("invalid createdOn in CreatedDeployedProduct returns error", func(t *testing.T) {
+		raw := `{"id":"1","createdOn":"invalid-time"}`
+		var cp entity.CreatedDeployedProduct
+		if err := json.Unmarshal([]byte(raw), &cp); err == nil {
+			t.Error("expected error unmarshaling malformed createdOn, got nil")
+		}
+	})
+
+	t.Run("invalid updatedOn in UpdatedDeployedProduct returns error", func(t *testing.T) {
+		raw := `{"id":"1","updatedOn":"invalid-time"}`
+		var up entity.UpdatedDeployedProduct
+		if err := json.Unmarshal([]byte(raw), &up); err == nil {
+			t.Error("expected error unmarshaling malformed updatedOn, got nil")
+		}
+	})
+
+	t.Run("invalid releasedOn in DeployedProductVersionRef returns error", func(t *testing.T) {
+		raw := `{"id":"1","name":"v1","releasedOn":"invalid-time"}`
+		var vr entity.DeployedProductVersionRef
+		if err := json.Unmarshal([]byte(raw), &vr); err == nil {
+			t.Error("expected error unmarshaling malformed releasedOn, got nil")
+		}
+	})
+
+	t.Run("nil or empty dates are allowed", func(t *testing.T) {
+		raw := `{"id":"1","name":"v1","releasedOn":null,"endOfLifeOn":""}`
+		var vr entity.DeployedProductVersionRef
+		if err := json.Unmarshal([]byte(raw), &vr); err != nil {
+			t.Fatalf("expected nil/empty dates to unmarshal cleanly, got: %v", err)
+		}
+		if vr.ReleasedDate != nil {
+			t.Errorf("expected ReleasedDate to be nil, got: %v", vr.ReleasedDate)
+		}
+		if vr.SupportEoLDate != nil {
+			t.Errorf("expected SupportEoLDate to be nil, got: %v", vr.SupportEoLDate)
+		}
+	})
+}

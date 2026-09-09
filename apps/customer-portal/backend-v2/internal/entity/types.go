@@ -957,7 +957,9 @@ func (p *CreatedDeployedProduct) UnmarshalJSON(data []byte) error {
 	}
 	p.ID = raw.ID
 	p.CreatedBy = raw.CreatedBy
-	if t, err := parseFlexibleTime(raw.CreatedOn); err == nil && t != nil {
+	if t, err := parseFlexibleTime(raw.CreatedOn); err != nil {
+		return err
+	} else if t != nil {
 		p.CreatedOn = *t
 	}
 	return nil
@@ -1010,16 +1012,24 @@ func (v *DeployedProductVersionRef) UnmarshalJSON(data []byte) error {
 	if rel == nil {
 		rel = raw.ReleasedOn
 	}
-	if t, err := parseFlexibleTime(rel); err == nil {
-		v.ReleasedDate = t
+	if rel != nil {
+		if t, err := parseFlexibleTime(rel); err != nil {
+			return err
+		} else if t != nil {
+			v.ReleasedDate = t
+		}
 	}
 
 	eol := raw.SupportEoLDate
 	if eol == nil {
 		eol = raw.EndOfLifeOn
 	}
-	if t, err := parseFlexibleTime(eol); err == nil {
-		v.SupportEoLDate = t
+	if eol != nil {
+		if t, err := parseFlexibleTime(eol); err != nil {
+			return err
+		} else if t != nil {
+			v.SupportEoLDate = t
+		}
 	}
 	return nil
 }
@@ -1104,10 +1114,14 @@ func (d *DeployedProductView) UnmarshalJSON(data []byte) error {
 		}
 	}
 
-	if t, err := parseFlexibleTime(raw.CreatedOn); err == nil && t != nil {
+	if t, err := parseFlexibleTime(raw.CreatedOn); err != nil {
+		return err
+	} else if t != nil {
 		d.CreatedOn = *t
 	}
-	if t, err := parseFlexibleTime(raw.UpdatedOn); err == nil && t != nil {
+	if t, err := parseFlexibleTime(raw.UpdatedOn); err != nil {
+		return err
+	} else if t != nil {
 		d.UpdatedOn = *t
 	}
 	return nil
@@ -1177,7 +1191,9 @@ func (p *UpdatedDeployedProduct) UnmarshalJSON(data []byte) error {
 	}
 	p.ID = raw.ID
 	p.UpdatedBy = raw.UpdatedBy
-	if t, err := parseFlexibleTime(raw.UpdatedOn); err == nil && t != nil {
+	if t, err := parseFlexibleTime(raw.UpdatedOn); err != nil {
+		return err
+	} else if t != nil {
 		p.UpdatedOn = *t
 	}
 	return nil
