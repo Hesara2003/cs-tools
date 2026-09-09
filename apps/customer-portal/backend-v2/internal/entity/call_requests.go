@@ -20,13 +20,21 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 )
+
+// toSysID converts an identifier (either a dashed UUID or a 32-hex sysid)
+// to a 32-character lowercase hex string without hyphens.
+func toSysID(id string) string {
+	return strings.ToLower(strings.ReplaceAll(id, "-", ""))
+}
 
 // CreateCallRequest calls POST /call-requests.
 //
 // NOTE: entity-service only supports call requests on its ServiceNow data
 // source — a Postgres-mode deployment 404s on every route in this file.
 func (c *Client) CreateCallRequest(ctx context.Context, req CreateCallRequestRequest) (CreateCallRequestResponse, error) {
+	req.CaseID = toSysID(req.CaseID)
 	var out CreateCallRequestResponse
 	err := c.postJSON(ctx, "/call-requests", req, &out)
 	return out, err
@@ -34,6 +42,7 @@ func (c *Client) CreateCallRequest(ctx context.Context, req CreateCallRequestReq
 
 // SearchCallRequests calls POST /call-requests/search.
 func (c *Client) SearchCallRequests(ctx context.Context, req SearchCallRequestsRequest) (SearchCallRequestsResponse, error) {
+	req.CaseID = toSysID(req.CaseID)
 	var out SearchCallRequestsResponse
 	err := c.postJSON(ctx, "/call-requests/search", req, &out)
 	return out, err
@@ -41,6 +50,7 @@ func (c *Client) SearchCallRequests(ctx context.Context, req SearchCallRequestsR
 
 // UpdateCallRequest calls PATCH /call-requests/{id}.
 func (c *Client) UpdateCallRequest(ctx context.Context, id string, req UpdateCallRequestRequest) (UpdateCallRequestResponse, error) {
+	id = toSysID(id)
 	req.ID = id // never serialized (json:"-"); set for consistency with the struct's doc comment
 	var out UpdateCallRequestResponse
 	err := c.patchJSON(ctx, fmt.Sprintf("/call-requests/%s", url.PathEscape(id)), req, &out)
