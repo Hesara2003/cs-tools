@@ -27,10 +27,14 @@ type CallRequestCreateResponse struct {
 
 // MapCallRequestCreate builds the portal response from entity-service's CreateCallRequestResponse.
 func MapCallRequestCreate(r entity.CreateCallRequestResponse) CallRequestCreateResponse {
+	state := r.CallRequest.State.Label
+	if state == "" {
+		state = r.CallRequest.State.ID
+	}
 	return CallRequestCreateResponse{
 		ID:        r.CallRequest.ID,
 		CreatedOn: r.CallRequest.CreatedOn,
-		State:     r.CallRequest.State,
+		State:     state,
 	}
 }
 
