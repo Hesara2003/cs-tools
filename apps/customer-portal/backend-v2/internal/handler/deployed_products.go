@@ -111,6 +111,11 @@ func (h *DeployedProductHandler) CreateDeployedProduct(w http.ResponseWriter, r 
 		return
 	}
 
+	if !isUUIDOrSysID(req.ProductID) || !isUUIDOrSysID(req.VersionID) || !isUUIDOrSysID(req.ProjectID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
 	result, err := h.entity.CreateDeployedProduct(r.Context(), dto.BuildEntityCreateDeployedProductRequest(deploymentID, req))
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity CreateDeployedProduct failed", "userID", user.UserID, "err", summarizeErr(err))

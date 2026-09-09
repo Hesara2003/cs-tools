@@ -199,6 +199,42 @@ func TestCreateDeployedProduct_NormalizesUUIDToSysID(t *testing.T) {
 	}
 }
 
+func TestCreateDeployedProduct_RejectsInvalidBodyIdentifiers(t *testing.T) {
+	fake := &fakeDeployedProductEntity{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /deployments/{deploymentId}/products", NewDeployedProductHandler(fake).CreateDeployedProduct)
+
+	invalidBodies := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "malformed product id",
+			body: `{"productId": "dp-created-1", "versionId": "6e8431b1-1b8c-0310-0bb3-da47b04bcba6", "projectId": "7e8431b1-1b8c-0310-0bb3-da47b04bcba6"}`,
+		},
+		{
+			name: "malformed version id",
+			body: `{"productId": "5e8431b1-1b8c-0310-0bb3-da47b04bcba6", "versionId": "invalid", "projectId": "7e8431b1-1b8c-0310-0bb3-da47b04bcba6"}`,
+		},
+		{
+			name: "empty project id",
+			body: `{"productId": "5e8431b1-1b8c-0310-0bb3-da47b04bcba6", "versionId": "6e8431b1-1b8c-0310-0bb3-da47b04bcba6", "projectId": ""}`,
+		},
+	}
+
+	for _, tc := range invalidBodies {
+		t.Run(tc.name, func(t *testing.T) {
+			req := authedRequest(http.MethodPost, "/deployments/4e8431b1-1b8c-0310-0bb3-da47b04bcba6/products", tc.body)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (body: %s)", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestPatchDeployedProduct_AcceptsUUIDAndBareSysID(t *testing.T) {
 	fake := &fakeDeployedProductEntity{}
 	mux := http.NewServeMux()
