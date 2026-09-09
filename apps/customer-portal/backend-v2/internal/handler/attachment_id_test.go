@@ -56,3 +56,62 @@ func TestIsAttachmentID(t *testing.T) {
 		}
 	}
 }
+
+func TestIsUUIDOrSysID(t *testing.T) {
+	valid := []string{
+		"09dc581d-3bb2-8710-9140-4c6aa5e45afe",
+		"09dc581d3bb2871091404c6aa5e45afe",
+		"09DC581D-3BB2-8710-9140-4C6AA5E45AFE",
+		"09DC581D3BB2871091404C6AA5E45AFE",
+		"4e8431b1-1b8c-0310-0bb3-da47b04bcba6",
+		"4e8431b11b8c03100bb3da47b04bcba6",
+	}
+	for _, id := range valid {
+		if !isUUIDOrSysID(id) {
+			t.Errorf("isUUIDOrSysID(%q) = false, want true", id)
+		}
+	}
+
+	invalid := []string{
+		"",
+		"invalid-id",
+		"09dc581d",
+		"09dc581d3bb2871091404c6aa5e45af",
+		"09dc581d3bb2871091404c6aa5e45afef",
+		"09dc581d3bb2871091404c6aa5e45azz",
+		"../path-traversal",
+		"4e8431b1-1b8c-0310-0bb3-da47b04bcba6?query=1",
+	}
+	for _, id := range invalid {
+		if isUUIDOrSysID(id) {
+			t.Errorf("isUUIDOrSysID(%q) = true, want false", id)
+		}
+	}
+}
+
+func TestToSysID(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{
+			input: "4e8431b1-1b8c-0310-0bb3-da47b04bcba6",
+			want:  "4e8431b11b8c03100bb3da47b04bcba6",
+		},
+		{
+			input: "4e8431b11b8c03100bb3da47b04bcba6",
+			want:  "4e8431b11b8c03100bb3da47b04bcba6",
+		},
+		{
+			input: "4E8431B1-1B8C-0310-0BB3-DA47B04BCBA6",
+			want:  "4E8431B11B8C03100BB3DA47B04BCBA6",
+		},
+	}
+	for _, tc := range tests {
+		got := toSysID(tc.input)
+		if got != tc.want {
+			t.Errorf("toSysID(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
