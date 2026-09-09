@@ -61,8 +61,8 @@ func TestBuildEntitySearchCallRequestsRequest_CaseIDFromPathAndStateKeysTranslat
 
 	got := BuildEntitySearchCallRequestsRequest("case-1", req)
 
-	if got.CaseID != "case-1" {
-		t.Fatalf("CaseID = %q, want %q", got.CaseID, "case-1")
+	if got.CaseID != toSysID("case-1") {
+		t.Fatalf("CaseID = %q, want %q", got.CaseID, toSysID("case-1"))
 	}
 	if got.Filters == nil {
 		t.Fatal("expected non-nil Filters")
@@ -73,6 +73,16 @@ func TestBuildEntitySearchCallRequestsRequest_CaseIDFromPathAndStateKeysTranslat
 	}
 	if got.Pagination != req.Pagination {
 		t.Fatalf("Pagination = %+v, want %+v", got.Pagination, req.Pagination)
+	}
+}
+
+func TestBuildEntitySearchCallRequestsRequest_CaseIDNormalizedToSysID(t *testing.T) {
+	req := CallRequestSearchRequest{
+		Pagination: entity.Pagination{Limit: 10, Offset: 0},
+	}
+	got := BuildEntitySearchCallRequestsRequest("26051dbc-3baa-8f50-9140-4c6aa5e45a1c", req)
+	if got.CaseID != "26051dbc3baa8f5091404c6aa5e45a1c" {
+		t.Fatalf("CaseID = %q, want %q", got.CaseID, "26051dbc3baa8f5091404c6aa5e45a1c")
 	}
 }
 
