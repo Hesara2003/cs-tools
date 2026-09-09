@@ -57,7 +57,7 @@ func (h *DeployedProductHandler) SearchDeployedProducts(w http.ResponseWriter, r
 	}
 
 	deploymentID := r.PathValue("deploymentId")
-	if deploymentID == "" || !uuidRe.MatchString(deploymentID) {
+	if deploymentID == "" || !isUUIDOrSysID(deploymentID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -95,7 +95,7 @@ func (h *DeployedProductHandler) CreateDeployedProduct(w http.ResponseWriter, r 
 	}
 
 	deploymentID := r.PathValue("deploymentId")
-	if deploymentID == "" || !uuidRe.MatchString(deploymentID) {
+	if deploymentID == "" || !isUUIDOrSysID(deploymentID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -138,7 +138,7 @@ func (h *DeployedProductHandler) PatchDeployedProduct(w http.ResponseWriter, r *
 
 	deploymentID := r.PathValue("deploymentId")
 	id := r.PathValue("id")
-	if deploymentID == "" || !uuidRe.MatchString(deploymentID) || id == "" || !uuidRe.MatchString(id) {
+	if deploymentID == "" || !isUUIDOrSysID(deploymentID) || id == "" || !isUUIDOrSysID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -163,7 +163,7 @@ func (h *DeployedProductHandler) PatchDeployedProduct(w http.ResponseWriter, r *
 		return
 	}
 
-	result, err := h.entity.UpdateDeployedProduct(r.Context(), id, req)
+	result, err := h.entity.UpdateDeployedProduct(r.Context(), toSysID(id), req)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity UpdateDeployedProduct failed", "userID", user.UserID, "deployedProductID", id, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to update deployed product.")
@@ -207,7 +207,7 @@ func (h *DeployedProductHandler) SearchDeployedProductMetrics(w http.ResponseWri
 
 	deploymentID := r.PathValue("deploymentId")
 	productID := r.PathValue("productId")
-	if !uuidRe.MatchString(deploymentID) || !uuidRe.MatchString(productID) {
+	if !isUUIDOrSysID(deploymentID) || !isUUIDOrSysID(productID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -226,8 +226,8 @@ func (h *DeployedProductHandler) SearchDeployedProductMetrics(w http.ResponseWri
 		return
 	}
 
-	entityReq := entity.DeployedProductMetricsRequest{DeploymentID: deploymentID, StartDate: req.StartDate, EndDate: req.EndDate}
-	result, err := h.entity.SearchDeployedProductMetrics(r.Context(), productID, entityReq)
+	entityReq := entity.DeployedProductMetricsRequest{DeploymentID: toSysID(deploymentID), StartDate: req.StartDate, EndDate: req.EndDate}
+	result, err := h.entity.SearchDeployedProductMetrics(r.Context(), toSysID(productID), entityReq)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchDeployedProductMetrics failed", "userID", user.UserID, "deployedProductID", productID, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to retrieve metrics for the deployed product.")
@@ -248,7 +248,7 @@ func (h *DeployedProductHandler) SearchDeployedProductUsageCounts(w http.Respons
 
 	deploymentID := r.PathValue("deploymentId")
 	productID := r.PathValue("productId")
-	if !uuidRe.MatchString(deploymentID) || !uuidRe.MatchString(productID) {
+	if !isUUIDOrSysID(deploymentID) || !isUUIDOrSysID(productID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -267,8 +267,8 @@ func (h *DeployedProductHandler) SearchDeployedProductUsageCounts(w http.Respons
 		return
 	}
 
-	entityReq := entity.DeployedProductUsageCountsRequest{DeploymentID: deploymentID, StartDate: req.StartDate, EndDate: req.EndDate}
-	result, err := h.entity.SearchDeployedProductUsageCounts(r.Context(), productID, entityReq)
+	entityReq := entity.DeployedProductUsageCountsRequest{DeploymentID: toSysID(deploymentID), StartDate: req.StartDate, EndDate: req.EndDate}
+	result, err := h.entity.SearchDeployedProductUsageCounts(r.Context(), toSysID(productID), entityReq)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchDeployedProductUsageCounts failed", "userID", user.UserID, "deployedProductID", productID, "err", summarizeErr(err))
 		mapUpstreamError(w, err, "Failed to retrieve metrics usage counts for the deployed product.")
