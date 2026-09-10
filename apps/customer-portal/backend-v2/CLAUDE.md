@@ -703,8 +703,29 @@ struct actually carries it), and a stray extra check on `PATCH` would just be de
 - **Auth**: always check `middleware.UserInfoFromContext(r.Context()) == nil` first → 401.
 - **Body size**: use the shared `readJSONBody(w, r)` helper (`internal/handler/response.go`) — caps
   at `maxRequestBodyBytes` (1 MiB) and validates the body is well-formed JSON.
-- **Path params**: guard against empty string after `r.PathValue("id")`; validate UUID-shaped IDs
-  with the package-level `uuidRe` and return 400 on mismatch before calling entity-service.
+- **Path params**: normalize an id-shaped path param with `toDashedID(r.PathValue("id"))`, then
+  validate it with `isEntityID` and return 400 on mismatch before calling entity-service. Do **not**
+  validate with `uuidRe` directly — an id reaches this API in two shapes (the dashed UUID
+  entity-service returns, and the bare 32-hex ServiceNow sysid the same value has upstream), and
+  `uuidRe` alone rejected every dashless one with `Invalid UUID format.` before it ever left this
+  backend. That was reported from staging as `GET /projects/<32-hex sysid>` → 400, from a URL
+  carrying the dashless form; the customer-portal webapp, unlike the CSM portal's
+  `useNormalizedIdParam`, does not repair such a URL itself.
+  - **Normalize to the dashed form, never to a sysid.** It is the only shape both entity-service
+    data sources accept: the ServiceNow path strips the hyphens itself (`uuidToSysid`, which
+    passes a non-canonical value through unchanged), but the Postgres path runs `validateUUIDs`
+    and rejects a dashless id outright. `internal/dto`'s `toSysID` (call requests, deployed
+    products) goes the other way on purpose — both of those endpoints are ServiceNow-only, so
+    the Postgres constraint doesn't apply there; don't copy that direction onto a route that
+    exists on both data sources.
+  - **Request-body id fields stay strict `uuidRe`** (`dto.CommentCreateRequest.ReferenceID`,
+    `CreateCaseRequest.ConversationID`, and the WebSocket message's own `conversationId`), and
+    `openapi.yaml` keeps `format: uuid` on exactly those — the app builds them from an
+    entity-service response, which is always dashed, so there is no dashless source to
+    accommodate. Every *path* parameter in the spec declares the two-shape `pattern` instead.
+  - `isAttachmentID` is the same predicate as `isEntityID` under a route-specific name; the
+    attachment routes deliberately forward the id verbatim without normalizing (fetched straight
+    from ServiceNow by sysid, no Postgres path to satisfy).
 - **Upstream errors**: always use `mapUpstreamError(w, err, "<fallback message>")` — never write
   custom status mappings inline. For a 400, this now returns entity-service's own message
   (`apiErr.Body`) verbatim to the caller instead of a generic string — entity-service's validation
