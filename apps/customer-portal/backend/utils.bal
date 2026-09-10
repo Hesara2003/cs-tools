@@ -1499,6 +1499,20 @@ public isolated function isProjectContractEnded(string? endDate) returns boolean
         return false;
     }
     string endDatePart = trimmed.substring(0, 10);
+    string[] parts = re `-`.split(endDatePart);
+    if parts.length() != 3 {
+        return false;
+    }
+    int|error year = int:fromString(parts[0]);
+    int|error month = int:fromString(parts[1]);
+    int|error day = int:fromString(parts[2]);
+    if year is error || month is error || day is error {
+        return false;
+    }
+    time:Error? validationErr = time:dateValidate({year, month, day});
+    if validationErr is time:Error {
+        return false;
+    }
     // End date is considered inclusive through the end of the specified day (UTC).
     // The contract has ended if current UTC date is strictly greater than the end date.
     string currentDatePart = time:utcToString(time:utcNow()).substring(0, 10);
