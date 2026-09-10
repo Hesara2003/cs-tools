@@ -1277,6 +1277,53 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
+        entity:ProjectResponse|error projectResponse = entity:getProject(userInfo.idToken, payload.projectId);
+        if projectResponse is error {
+            if getStatusCode(projectResponse) == http:STATUS_UNAUTHORIZED {
+                log:printWarn(string `User: ${userInfo.userId} is not authorized to access the customer portal!`);
+                return <http:Unauthorized>{
+                    body: {
+                        message: ERR_MSG_UNAUTHORIZED_ACCESS
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_FORBIDDEN {
+                logForbiddenProjectAccess(payload.projectId, userInfo.userId);
+                return <http:Forbidden>{
+                    body: {
+                        message: "You're not authorized to create a case for the selected project. " +
+                        "Please check your access permissions or contact support."
+                    }
+                };
+            }
+            if getStatusCode(projectResponse) == http:STATUS_NOT_FOUND {
+                log:printWarn(string `Project with ID: ${payload.projectId} not found for user: ${userInfo.userId}`);
+                return <http:BadRequest>{
+                    body: {
+                        message: "The requested project does not exist or you don't have access to it."
+                    }
+                };
+            }
+
+            string customError = "Failed to retrieve project details.";
+            log:printError(customError, projectResponse);
+            return <http:InternalServerError>{
+                body: {
+                    message: customError
+                }
+            };
+        }
+
+        if isProjectSuspendedOrExpired(projectResponse.closureState, projectResponse.endDate) {
+            log:printWarn(string `User: ${userInfo.userId} attempted to create a case for suspended/expired project: ${
+                    payload.projectId}!`);
+            return <http:Forbidden>{
+                body: {
+                    message: "Cannot create cases for a suspended or contract-expired project."
+                }
+            };
+        }
+
         entity:CaseCreateResponse|error createdCaseResponse = entity:createCase(userInfo.idToken, payload);
         if createdCaseResponse is error {
             if getStatusCode(createdCaseResponse) == http:STATUS_UNAUTHORIZED {
