@@ -73,6 +73,14 @@ const (
 	ErrMsgInternal     = "An internal server error occurred. Please try again later."
 	ErrMsgInvalidUUID  = "Invalid UUID format."
 	errMsgReadBody     = "Failed to read request body."
+
+	// Closed-case attachment guards (see caseIsClosed in cases.go). The wording
+	// matches the Ballerina backend's ERR_MSG_CASE_CLOSED_FOR_ATTACHMENT_*
+	// constants so both backends reject the same operation with the same
+	// message — the webapp surfaces it verbatim in its error toast.
+	ErrMsgCaseClosedForAttachmentCreate = "Cannot add attachments to a closed case."
+	ErrMsgCaseClosedForAttachmentUpdate = "Cannot update attachments on a closed case."
+	ErrMsgCaseClosedForAttachmentDelete = "Cannot delete attachments from a closed case."
 )
 
 // errorBody is the JSON error payload format matching the customer-portal pattern.
