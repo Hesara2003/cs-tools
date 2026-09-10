@@ -56,8 +56,8 @@ func (h *CallRequestHandler) CreateCallRequest(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	caseID := r.PathValue("caseId")
-	if caseID == "" || !uuidRe.MatchString(caseID) {
+	caseID := toDashedID(r.PathValue("caseId"))
+	if caseID == "" || !isEntityID(caseID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -99,8 +99,8 @@ func (h *CallRequestHandler) SearchCallRequests(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	caseID := r.PathValue("caseId")
-	if caseID == "" || !uuidRe.MatchString(caseID) {
+	caseID := toDashedID(r.PathValue("caseId"))
+	if caseID == "" || !isEntityID(caseID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -137,8 +137,8 @@ func (h *CallRequestHandler) PatchCallRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
+	id := toDashedID(r.PathValue("id"))
+	if id == "" || !isEntityID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}

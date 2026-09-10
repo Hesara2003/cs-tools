@@ -152,8 +152,8 @@ func (h *AIChatHandler) SearchConversations(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	projectID := r.PathValue("id")
-	if projectID == "" || !uuidRe.MatchString(projectID) {
+	projectID := toDashedID(r.PathValue("id"))
+	if projectID == "" || !isEntityID(projectID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -189,8 +189,8 @@ func (h *AIChatHandler) GetConversationMessages(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	conversationID := r.PathValue("id")
-	if conversationID == "" || !uuidRe.MatchString(conversationID) {
+	conversationID := toDashedID(r.PathValue("id"))
+	if conversationID == "" || !isEntityID(conversationID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -237,8 +237,8 @@ func (h *AIChatHandler) CreateConversation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	projectID := r.PathValue("id")
-	if !uuidRe.MatchString(projectID) {
+	projectID := toDashedID(r.PathValue("id"))
+	if !isEntityID(projectID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -347,9 +347,9 @@ func (h *AIChatHandler) SendConversationMessage(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	projectID := r.PathValue("projectId")
-	conversationID := r.PathValue("conversationId")
-	if !uuidRe.MatchString(projectID) || !uuidRe.MatchString(conversationID) {
+	projectID := toDashedID(r.PathValue("projectId"))
+	conversationID := toDashedID(r.PathValue("conversationId"))
+	if !isEntityID(projectID) || !isEntityID(conversationID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -430,8 +430,8 @@ func (h *AIChatHandler) GetConversation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
+	id := toDashedID(r.PathValue("id"))
+	if id == "" || !isEntityID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -455,8 +455,8 @@ func (h *AIChatHandler) UpdateConversation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
+	id := toDashedID(r.PathValue("id"))
+	if id == "" || !isEntityID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -495,9 +495,9 @@ func (h *AIChatHandler) GetConversationSummary(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	projectID := r.PathValue("id")
-	conversationID := r.PathValue("conversationId")
-	if !uuidRe.MatchString(projectID) || !uuidRe.MatchString(conversationID) {
+	projectID := toDashedID(r.PathValue("id"))
+	conversationID := toDashedID(r.PathValue("conversationId"))
+	if !isEntityID(projectID) || !isEntityID(conversationID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}

@@ -79,7 +79,7 @@ func (h *InstanceHandler) searchInstances(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
 		return
 	}
-	if !uuidRe.MatchString(pathID) {
+	if !isEntityID(pathID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -121,20 +121,20 @@ func (h *InstanceHandler) searchInstances(w http.ResponseWriter, r *http.Request
 
 // SearchProjectInstances handles POST /projects/{id}/instances/search.
 func (h *InstanceHandler) SearchProjectInstances(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstances(w, r, projectScope(id), id, "project")
 }
 
 // SearchDeploymentInstances handles POST /deployments/{id}/instances/search.
 func (h *InstanceHandler) SearchDeploymentInstances(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstances(w, r, deploymentScope(id), id, "deployment")
 }
 
 // SearchDeployedProductInstances handles
 // POST /deployments/products/{id}/instances/search.
 func (h *InstanceHandler) SearchDeployedProductInstances(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstances(w, r, deployedProductScope(id), id, "deployed product")
 }
 
@@ -146,7 +146,7 @@ func (h *InstanceHandler) searchInstanceMetrics(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
 		return
 	}
-	if !uuidRe.MatchString(pathID) {
+	if !isEntityID(pathID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -181,20 +181,20 @@ func (h *InstanceHandler) searchInstanceMetrics(w http.ResponseWriter, r *http.R
 
 // SearchProjectInstanceMetrics handles POST /projects/{id}/instances/metrics/search.
 func (h *InstanceHandler) SearchProjectInstanceMetrics(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstanceMetrics(w, r, projectScope(id), id, "project")
 }
 
 // SearchDeploymentInstanceMetrics handles POST /deployments/{id}/instances/metrics/search.
 func (h *InstanceHandler) SearchDeploymentInstanceMetrics(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstanceMetrics(w, r, deploymentScope(id), id, "deployment")
 }
 
 // SearchDeployedProductInstanceMetrics handles
 // POST /deployments/products/{id}/instances/metrics/search.
 func (h *InstanceHandler) SearchDeployedProductInstanceMetrics(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstanceMetrics(w, r, deployedProductScope(id), id, "deployed product")
 }
 
@@ -206,7 +206,7 @@ func (h *InstanceHandler) searchInstanceUsage(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
 		return
 	}
-	if !uuidRe.MatchString(pathID) {
+	if !isEntityID(pathID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -241,20 +241,20 @@ func (h *InstanceHandler) searchInstanceUsage(w http.ResponseWriter, r *http.Req
 
 // SearchProjectInstanceUsage handles POST /projects/{id}/instances/usages/search.
 func (h *InstanceHandler) SearchProjectInstanceUsage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstanceUsage(w, r, projectScope(id), id, "project")
 }
 
 // SearchDeploymentInstanceUsage handles POST /deployments/{id}/instances/usages/search.
 func (h *InstanceHandler) SearchDeploymentInstanceUsage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstanceUsage(w, r, deploymentScope(id), id, "deployment")
 }
 
 // SearchDeployedProductInstanceUsage handles
 // POST /deployments/products/{id}/instances/usages/search.
 func (h *InstanceHandler) SearchDeployedProductInstanceUsage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstanceUsage(w, r, deployedProductScope(id), id, "deployed product")
 }
 
@@ -271,7 +271,7 @@ func (h *InstanceHandler) searchInstanceMetricsStats(w http.ResponseWriter, r *h
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
 		return
 	}
-	if !uuidRe.MatchString(pathID) {
+	if !isEntityID(pathID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -306,20 +306,20 @@ func (h *InstanceHandler) searchInstanceMetricsStats(w http.ResponseWriter, r *h
 
 // SearchProjectInstanceMetricsStats handles POST /projects/{id}/instances/stats/metrics/search.
 func (h *InstanceHandler) SearchProjectInstanceMetricsStats(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstanceMetricsStats(w, r, projectScope(id), id, "project")
 }
 
 // SearchDeploymentInstanceMetricsStats handles POST /deployments/{id}/instances/stats/metrics/search.
 func (h *InstanceHandler) SearchDeploymentInstanceMetricsStats(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstanceMetricsStats(w, r, deploymentScope(id), id, "deployment")
 }
 
 // SearchDeployedProductInstanceMetricsStats handles
 // POST /deployments/products/{id}/instances/stats/metrics/search.
 func (h *InstanceHandler) SearchDeployedProductInstanceMetricsStats(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstanceMetricsStats(w, r, deployedProductScope(id), id, "deployed product")
 }
 
@@ -331,7 +331,7 @@ func (h *InstanceHandler) searchInstanceUsageStats(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
 		return
 	}
-	if !uuidRe.MatchString(pathID) {
+	if !isEntityID(pathID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -367,19 +367,19 @@ func (h *InstanceHandler) searchInstanceUsageStats(w http.ResponseWriter, r *htt
 
 // SearchProjectInstanceUsageStats handles POST /projects/{id}/instances/stats/usages/search.
 func (h *InstanceHandler) SearchProjectInstanceUsageStats(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstanceUsageStats(w, r, projectScope(id), id, "project")
 }
 
 // SearchDeploymentInstanceUsageStats handles POST /deployments/{id}/instances/stats/usages/search.
 func (h *InstanceHandler) SearchDeploymentInstanceUsageStats(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstanceUsageStats(w, r, deploymentScope(id), id, "deployment")
 }
 
 // SearchDeployedProductInstanceUsageStats handles
 // POST /deployments/products/{id}/instances/stats/usages/search.
 func (h *InstanceHandler) SearchDeployedProductInstanceUsageStats(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := toDashedID(r.PathValue("id"))
 	h.searchInstanceUsageStats(w, r, deployedProductScope(id), id, "deployed product")
 }

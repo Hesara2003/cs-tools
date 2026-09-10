@@ -52,8 +52,8 @@ func (h *CatalogHandler) SearchCatalogs(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	deployedProductID := r.PathValue("deployedProductId")
-	if !uuidRe.MatchString(deployedProductID) {
+	deployedProductID := toDashedID(r.PathValue("deployedProductId"))
+	if !isEntityID(deployedProductID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -87,9 +87,9 @@ func (h *CatalogHandler) GetCatalogItemVariables(w http.ResponseWriter, r *http.
 		return
 	}
 
-	catalogID := r.PathValue("catalogId")
-	catalogItemID := r.PathValue("itemId")
-	if !uuidRe.MatchString(catalogID) || !uuidRe.MatchString(catalogItemID) {
+	catalogID := toDashedID(r.PathValue("catalogId"))
+	catalogItemID := toDashedID(r.PathValue("itemId"))
+	if !isEntityID(catalogID) || !isEntityID(catalogItemID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}

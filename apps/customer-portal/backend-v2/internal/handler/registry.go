@@ -106,8 +106,8 @@ func (h *RegistryHandler) CreateRegistryToken(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	projectID := r.PathValue("id")
-	if projectID == "" || !uuidRe.MatchString(projectID) {
+	projectID := toDashedID(r.PathValue("id"))
+	if projectID == "" || !isEntityID(projectID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -192,8 +192,8 @@ func (h *RegistryHandler) SearchRegistryTokens(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	projectID := r.PathValue("id")
-	if projectID == "" || !uuidRe.MatchString(projectID) {
+	projectID := toDashedID(r.PathValue("id"))
+	if projectID == "" || !isEntityID(projectID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -282,7 +282,7 @@ func (h *RegistryHandler) DeleteRegistryToken(w http.ResponseWriter, r *http.Req
 	// tokenID is not UUID-validated: the registry service's own token IDs are
 	// not UUID-shaped, so this route takes a plain `string` path param,
 	// unlike the project-scoped registry routes above.
-	tokenID := r.PathValue("id")
+	tokenID := toDashedID(r.PathValue("id"))
 	if tokenID == "" {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
@@ -310,7 +310,7 @@ func (h *RegistryHandler) RegenerateRegistryToken(w http.ResponseWriter, r *http
 	}
 
 	// tokenID is not UUID-validated — see the matching comment in DeleteRegistryToken.
-	tokenID := r.PathValue("id")
+	tokenID := toDashedID(r.PathValue("id"))
 	if tokenID == "" {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
@@ -338,8 +338,8 @@ func (h *RegistryHandler) GetProjectIntegrationUsers(w http.ResponseWriter, r *h
 		return
 	}
 
-	projectID := r.PathValue("id")
-	if projectID == "" || !uuidRe.MatchString(projectID) {
+	projectID := toDashedID(r.PathValue("id"))
+	if projectID == "" || !isEntityID(projectID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}

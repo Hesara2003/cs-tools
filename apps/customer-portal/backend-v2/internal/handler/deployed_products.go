@@ -56,8 +56,8 @@ func (h *DeployedProductHandler) SearchDeployedProducts(w http.ResponseWriter, r
 		return
 	}
 
-	deploymentID := r.PathValue("deploymentId")
-	if deploymentID == "" || !uuidRe.MatchString(deploymentID) {
+	deploymentID := toDashedID(r.PathValue("deploymentId"))
+	if deploymentID == "" || !isEntityID(deploymentID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -94,8 +94,8 @@ func (h *DeployedProductHandler) CreateDeployedProduct(w http.ResponseWriter, r 
 		return
 	}
 
-	deploymentID := r.PathValue("deploymentId")
-	if deploymentID == "" || !uuidRe.MatchString(deploymentID) {
+	deploymentID := toDashedID(r.PathValue("deploymentId"))
+	if deploymentID == "" || !isEntityID(deploymentID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -136,9 +136,9 @@ func (h *DeployedProductHandler) PatchDeployedProduct(w http.ResponseWriter, r *
 		return
 	}
 
-	deploymentID := r.PathValue("deploymentId")
-	id := r.PathValue("id")
-	if deploymentID == "" || !uuidRe.MatchString(deploymentID) || id == "" || !uuidRe.MatchString(id) {
+	deploymentID := toDashedID(r.PathValue("deploymentId"))
+	id := toDashedID(r.PathValue("id"))
+	if deploymentID == "" || !isEntityID(deploymentID) || id == "" || !isEntityID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -205,9 +205,9 @@ func (h *DeployedProductHandler) SearchDeployedProductMetrics(w http.ResponseWri
 		return
 	}
 
-	deploymentID := r.PathValue("deploymentId")
-	productID := r.PathValue("productId")
-	if !uuidRe.MatchString(deploymentID) || !uuidRe.MatchString(productID) {
+	deploymentID := toDashedID(r.PathValue("deploymentId"))
+	productID := toDashedID(r.PathValue("productId"))
+	if !isEntityID(deploymentID) || !isEntityID(productID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -246,9 +246,9 @@ func (h *DeployedProductHandler) SearchDeployedProductUsageCounts(w http.Respons
 		return
 	}
 
-	deploymentID := r.PathValue("deploymentId")
-	productID := r.PathValue("productId")
-	if !uuidRe.MatchString(deploymentID) || !uuidRe.MatchString(productID) {
+	deploymentID := toDashedID(r.PathValue("deploymentId"))
+	productID := toDashedID(r.PathValue("productId"))
+	if !isEntityID(deploymentID) || !isEntityID(productID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}

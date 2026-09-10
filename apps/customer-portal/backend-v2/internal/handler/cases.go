@@ -63,8 +63,8 @@ func (h *CaseHandler) SearchCases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID := r.PathValue("id")
-	if projectID == "" || !uuidRe.MatchString(projectID) {
+	projectID := toDashedID(r.PathValue("id"))
+	if projectID == "" || !isEntityID(projectID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -98,8 +98,8 @@ func (h *CaseHandler) SearchCaseAttachments(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
+	id := toDashedID(r.PathValue("id"))
+	if id == "" || !isEntityID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -131,8 +131,8 @@ func (h *CaseHandler) CreateCaseAttachment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
+	id := toDashedID(r.PathValue("id"))
+	if id == "" || !isEntityID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -166,8 +166,8 @@ func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
+	id := toDashedID(r.PathValue("id"))
+	if id == "" || !isEntityID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -237,8 +237,8 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
+	id := toDashedID(r.PathValue("id"))
+	if id == "" || !isEntityID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -284,8 +284,8 @@ func (h *CaseHandler) CreateCaseComment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
+	id := toDashedID(r.PathValue("id"))
+	if id == "" || !isEntityID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -323,8 +323,8 @@ func (h *CaseHandler) SearchCaseActivities(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
+	id := toDashedID(r.PathValue("id"))
+	if id == "" || !isEntityID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -358,8 +358,8 @@ func (h *CaseHandler) GetCaseFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
+	id := toDashedID(r.PathValue("id"))
+	if id == "" || !isEntityID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -382,8 +382,8 @@ func (h *CaseHandler) SubmitCaseFeedback(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
+	id := toDashedID(r.PathValue("id"))
+	if id == "" || !isEntityID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -421,9 +421,9 @@ func (h *CaseHandler) PatchCaseAttachment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	caseID := r.PathValue("caseId")
-	attachmentID := r.PathValue("attachmentId")
-	if !uuidRe.MatchString(caseID) || !uuidRe.MatchString(attachmentID) {
+	caseID := toDashedID(r.PathValue("caseId"))
+	attachmentID := toDashedID(r.PathValue("attachmentId"))
+	if !isEntityID(caseID) || !isEntityID(attachmentID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -459,8 +459,8 @@ func (h *CaseHandler) CreateCaseEscalation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	caseID := r.PathValue("caseId")
-	if !uuidRe.MatchString(caseID) {
+	caseID := toDashedID(r.PathValue("caseId"))
+	if !isEntityID(caseID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -501,8 +501,8 @@ func (h *CaseHandler) SearchCaseEscalations(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	caseID := r.PathValue("caseId")
-	if !uuidRe.MatchString(caseID) {
+	caseID := toDashedID(r.PathValue("caseId"))
+	if !isEntityID(caseID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}

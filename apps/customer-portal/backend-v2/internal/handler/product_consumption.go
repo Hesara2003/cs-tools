@@ -76,9 +76,9 @@ func (h *ProductConsumptionHandler) GetDeploymentLicense(w http.ResponseWriter, 
 	// unrecognized ResponseWriter simply keeps the server's default timeout.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(licenseProvisioningWriteDeadline))
 
-	projectID := r.PathValue("projectId")
-	deploymentID := r.PathValue("deploymentId")
-	if !uuidRe.MatchString(projectID) || !uuidRe.MatchString(deploymentID) {
+	projectID := toDashedID(r.PathValue("projectId"))
+	deploymentID := toDashedID(r.PathValue("deploymentId"))
+	if !isEntityID(projectID) || !isEntityID(deploymentID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}

@@ -96,8 +96,8 @@ func (h *ProductVulnerabilityHandler) GetProductVulnerability(w http.ResponseWri
 		return
 	}
 
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
+	id := toDashedID(r.PathValue("id"))
+	if id == "" || !isEntityID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}

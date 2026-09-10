@@ -56,8 +56,8 @@ func (h *TimeCardHandler) SearchTimeCards(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	projectID := r.PathValue("id")
-	if projectID == "" || !uuidRe.MatchString(projectID) {
+	projectID := toDashedID(r.PathValue("id"))
+	if projectID == "" || !isEntityID(projectID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}

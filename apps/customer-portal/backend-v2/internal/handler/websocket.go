@@ -264,8 +264,11 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	projectID := r.URL.Query().Get("sessionId")
-	if projectID == "" || !uuidRe.MatchString(projectID) {
+	// sessionId carries the project id (see this handler's doc comment), and is
+	// normalized like any other URL-supplied id — the value reaches this
+	// listener from a browser-built URL, so it can be the dashless form too.
+	projectID := toDashedID(r.URL.Query().Get("sessionId"))
+	if projectID == "" || !isEntityID(projectID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}

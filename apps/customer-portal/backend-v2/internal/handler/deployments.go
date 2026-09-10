@@ -56,8 +56,8 @@ func (h *DeploymentHandler) SearchDeployments(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	projectID := r.PathValue("id")
-	if projectID == "" || !uuidRe.MatchString(projectID) {
+	projectID := toDashedID(r.PathValue("id"))
+	if projectID == "" || !isEntityID(projectID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -100,8 +100,8 @@ func (h *DeploymentHandler) CreateDeployment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	projectID := r.PathValue("id")
-	if projectID == "" || !uuidRe.MatchString(projectID) {
+	projectID := toDashedID(r.PathValue("id"))
+	if projectID == "" || !isEntityID(projectID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -139,8 +139,8 @@ func (h *DeploymentHandler) PatchDeployment(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
+	id := toDashedID(r.PathValue("id"))
+	if id == "" || !isEntityID(id) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -190,9 +190,9 @@ func (h *DeploymentHandler) PatchDeploymentAttachment(w http.ResponseWriter, r *
 		return
 	}
 
-	deploymentID := r.PathValue("deploymentId")
-	attachmentID := r.PathValue("attachmentId")
-	if !uuidRe.MatchString(deploymentID) || !uuidRe.MatchString(attachmentID) {
+	deploymentID := toDashedID(r.PathValue("deploymentId"))
+	attachmentID := toDashedID(r.PathValue("attachmentId"))
+	if !isEntityID(deploymentID) || !isEntityID(attachmentID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -232,8 +232,8 @@ func (h *DeploymentHandler) SearchDeploymentAttachments(w http.ResponseWriter, r
 		return
 	}
 
-	deploymentID := r.PathValue("deploymentId")
-	if deploymentID == "" || !uuidRe.MatchString(deploymentID) {
+	deploymentID := toDashedID(r.PathValue("deploymentId"))
+	if deploymentID == "" || !isEntityID(deploymentID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
@@ -265,8 +265,8 @@ func (h *DeploymentHandler) CreateDeploymentAttachment(w http.ResponseWriter, r 
 		return
 	}
 
-	deploymentID := r.PathValue("deploymentId")
-	if deploymentID == "" || !uuidRe.MatchString(deploymentID) {
+	deploymentID := toDashedID(r.PathValue("deploymentId"))
+	if deploymentID == "" || !isEntityID(deploymentID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
