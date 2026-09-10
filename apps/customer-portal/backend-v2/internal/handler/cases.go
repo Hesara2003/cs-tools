@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/dto"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
@@ -31,6 +33,7 @@ import (
 type entityCaseClient interface {
 	SearchCases(ctx context.Context, req entity.SearchCasesRequest) (entity.SearchCasesResponse, error)
 	GetCase(ctx context.Context, id string) (entity.CaseView, error)
+	GetProject(ctx context.Context, id string) (entity.ProjectDetailsView, error)
 	CreateCase(ctx context.Context, req entity.CreateCaseRequest) (entity.CreateCaseResponse, error)
 	UpdateConversation(ctx context.Context, id string, req entity.UpdateConversationRequest) (entity.UpdateConversationResponse, error)
 	UpdateCase(ctx context.Context, id string, req entity.UpdateCaseRequest) (entity.UpdateCaseResponse, error)
@@ -200,6 +203,25 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
+
+	if req.ProjectID == "" || !uuidRe.MatchString(req.ProjectID) {
+		writeError(w, http.StatusBadRequest, "Project ID is required and must be a valid UUID.")
+		return
+	}
+
+	project, err := h.entity.GetProject(r.Context(), req.ProjectID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetProject failed during CreateCase", "userID", user.UserID, "projectID", req.ProjectID, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to retrieve project details.")
+		return
+	}
+
+	if isProjectSuspendedOrExpired(project) {
+		slog.WarnContext(r.Context(), "attempted to create case for suspended or expired project", "userID", user.UserID, "projectID", req.ProjectID)
+		writeError(w, http.StatusForbidden, "Cannot create cases for a suspended or contract-expired project.")
+		return
+	}
+
 	entityReq := dto.BuildEntityCreateCaseRequest(req)
 	// CreatedBy is server-set from the authenticated caller, never from the
 	// request body (the struct's json:"-" tag means a client-supplied value
@@ -527,3 +549,17 @@ func (h *CaseHandler) SearchCaseEscalations(w http.ResponseWriter, r *http.Reque
 
 	writeJSONValue(w, http.StatusOK, dto.MapEscalationSearchResponse(result))
 }
+
+// isProjectSuspendedOrExpired checks if a project is suspended or its contract has ended.
+func isProjectSuspendedOrExpired(project entity.ProjectDetailsView) bool {
+	if project.ClosureState != nil && strings.EqualFold(strings.TrimSpace(*project.ClosureState), "suspended") {
+		return true
+	}
+	if !project.EndDate.IsZero() {
+		todayUTC := time.Now().UTC().Format("2006-01-02")
+		endDateUTC := project.EndDate.UTC().Format("2006-01-02")
+		return todayUTC > endDateUTC
+	}
+	return false
+}
+
