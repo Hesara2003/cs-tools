@@ -302,6 +302,13 @@ export function isProjectContractEnded(
     const endOfDay = Number(match[3]);
     const endDateTime = new Date(Date.UTC(endOfYear, endOfMonth, endOfDay, 23, 59, 59, 999));
     if (Number.isNaN(endDateTime.getTime())) return false;
+    if (
+      endDateTime.getUTCFullYear() !== endOfYear ||
+      endDateTime.getUTCMonth() !== endOfMonth ||
+      endDateTime.getUTCDate() !== endOfDay
+    ) {
+      return false;
+    }
     return now.getTime() > endDateTime.getTime();
   }
 
