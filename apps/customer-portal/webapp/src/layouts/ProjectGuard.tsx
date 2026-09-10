@@ -16,7 +16,8 @@
 
 import { type JSX, useEffect } from "react";
 import { Box, LinearProgress } from "@wso2/oxygen-ui";
-import { Outlet, useParams } from "react-router";
+import { Outlet } from "react-router";
+import useNormalizedIdParam from "@hooks/useNormalizedIdParam";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import ApiErrorState from "@components/error/ApiErrorState";
 import ProjectSuspendedNoticePage from "@/components/access-control/ProjectSuspendedNoticePage";
@@ -34,7 +35,7 @@ import { ProjectClosureState } from "@/types/permission";
  * @returns {JSX.Element} The child outlet or an error/suspension page.
  */
 function ProjectGuardContent(): JSX.Element {
-  const { projectId } = useParams<{ projectId: string }>();
+  const projectId = useNormalizedIdParam("projectId");
   const { setIsErrorPageDisplayed, setIsProjectSuspended } =
     useErrorPageContext();
 
