@@ -45,6 +45,42 @@ var uuidRe = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 // sysidRe matches a bare ServiceNow sysid: 32 hex characters, no dashes.
 var sysidRe = regexp.MustCompile(`(?i)^[0-9a-f]{32}$`)
 
+// isEntityID reports whether id is a usable entity identifier — either the
+// dashed UUID entity-service returns or the bare 32-hex ServiceNow sysid the
+// same value has upstream.
+//
+// Both shapes genuinely reach this API. Every id in an entity-service response
+// is already dashed (its own sysidToUUID runs on every response id), but
+// plenty of inbound links carry the dashless form: a bookmarked or shared URL,
+// a value copied out of ServiceNow, or an inline comment image, referenced
+// only as `<img src="…/<sysid>.iix">` and so extracted by the frontend as a
+// bare 32-hex sysid. Accepting only the dashed form failed all of those with a
+// flat 400 before this existed — and unlike the CSM portal, whose webapp
+// repairs a dashless id in its own routes (useNormalizedIdParam), the
+// customer-portal webapp has no such redirect.
+func isEntityID(id string) bool {
+	return uuidRe.MatchString(id) || sysidRe.MatchString(id)
+}
+
+// toDashedID returns id in the canonical dashed-UUID form: hyphens inserted at
+// the 8-4-4-4-12 positions when id is a bare 32-hex sysid, unchanged
+// otherwise (already dashed, or not an identifier at all). Validate the result
+// with isEntityID — normalize first, then check.
+//
+// The dashed form is deliberately what gets forwarded upstream, because it is
+// the only shape BOTH entity-service data sources accept. Its ServiceNow path
+// strips the hyphens itself (uuidToSysid), so either shape works there; its
+// Postgres path runs validateUUIDs and rejects a dashless id outright. So
+// normalizing to a sysid instead — what the call-request and deployed-product
+// routes do, both of which are ServiceNow-only endpoints — would work on a
+// ServiceNow deployment and 400 on a Postgres one.
+func toDashedID(id string) string {
+	if !sysidRe.MatchString(id) {
+		return id
+	}
+	return id[0:8] + "-" + id[8:12] + "-" + id[12:16] + "-" + id[16:20] + "-" + id[20:32]
+}
+
 // isAttachmentID reports whether id is a usable attachment identifier — either a
 // dashed UUID or a bare ServiceNow sysid.
 //
@@ -59,8 +95,13 @@ var sysidRe = regexp.MustCompile(`(?i)^[0-9a-f]{32}$`)
 // `entity:IdString`, a plain string alias with no format constraint. This keeps
 // the same contract while still refusing anything that is neither shape, so the
 // value remains safe to place in an upstream URL path.
+//
+// Same predicate as isEntityID, kept under this name because the attachment
+// routes pass the id upstream verbatim rather than normalizing it: an
+// attachment is fetched straight from ServiceNow by sysid, so there is no
+// Postgres path here to make the dashed form the safer one to forward.
 func isAttachmentID(id string) bool {
-	return uuidRe.MatchString(id) || sysidRe.MatchString(id)
+	return isEntityID(id)
 }
 
 // Error message constants matching the customer-portal error vocabulary.
