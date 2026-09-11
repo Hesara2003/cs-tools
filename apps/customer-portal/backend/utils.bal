@@ -1531,3 +1531,18 @@ public isolated function isProjectSuspendedOrExpired(string? closureState, strin
     return isProjectContractEnded(endDate);
 }
 
+# Check whether a case is closed.
+#
+# + caseResponse - Case response record from entity service
+# + return - True if the case is closed, false otherwise
+public isolated function isCaseClosed(entity:CaseResponse caseResponse) returns boolean {
+    entity:ChoiceListItem? state = caseResponse.state;
+    if state !is () {
+        string label = state.label.toLowerAscii().trim();
+        string id = state.id.toString().toLowerAscii().trim();
+        if label == "closed" || id == "closed" || id == "3" {
+            return true;
+        }
+    }
+    return false;
+}

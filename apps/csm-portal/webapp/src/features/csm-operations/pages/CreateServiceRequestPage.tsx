@@ -43,6 +43,7 @@ import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
+import { useProjectMetadata } from "@features/csm-projects/api/useProjectMetadata";
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
 import { usePostCsmCaseAttachment } from "@features/csm-cases/api/useCsmCaseAttachments";
@@ -56,6 +57,8 @@ import QueryErrorState from "@components/QueryErrorState";
 import {
   encodeVariableValue,
   getFirstEmptyRequiredField,
+  getFirstFieldExceedingMaxLength,
+  getFirstFieldFailingValidation,
   getUserEditableVariables,
   isAttachmentField,
 } from "@features/csm-operations/utils/catalogVariables";
@@ -133,6 +136,23 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
   const deployments = useSearchDeployments(projectId || undefined);
   const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
+  // Service requests are only raisable against a subset of a project's
+  // deployed products, keyed by category — mirrors CP's
+  // CreateServiceRequestPage, which restricts its deployed-product picker the
+  // same way. Fetched independently of deployedProducts (no server-side
+  // filter param exists for this yet) and applied client-side below. A
+  // missing/empty/failed-to-load srProductCategories must never narrow the
+  // list to zero when it would otherwise show options — fail open, not
+  // closed.
+  const projectMetadata = useProjectMetadata(projectId || undefined);
+  const srProductCategories = projectMetadata.data?.features?.srProductCategories;
+  const deployedProductOptions = useMemo(() => {
+    const options = deployedProducts.data ?? [];
+    if (!srProductCategories || srProductCategories.length === 0) return options;
+    return options.filter(
+      (o) => o.category != null && srProductCategories.includes(o.category),
+    );
+  }, [deployedProducts.data, srProductCategories]);
   const catalogs = useSearchCatalogs(deployedProductId || undefined);
   const variables = useCatalogItemVariables(
     catalogId || undefined,
@@ -160,6 +180,21 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const firstEmptyRequired = useMemo(
     () => getFirstEmptyRequiredField(allVariables, answers),
     [allVariables, answers],
+  );
+  // Checked in this order — empty-required first, since a field that's both
+  // empty and has a maxLength/validation rule should report the more
+  // actionable "fill this in" message, not a pattern mismatch on nothing.
+  const firstExceedingMaxLength = useMemo(
+    () =>
+      firstEmptyRequired ? null : getFirstFieldExceedingMaxLength(allVariables, answers),
+    [allVariables, answers, firstEmptyRequired],
+  );
+  const firstFailingValidation = useMemo(
+    () =>
+      firstEmptyRequired || firstExceedingMaxLength
+        ? null
+        : getFirstFieldFailingValidation(allVariables, answers),
+    [allVariables, answers, firstEmptyRequired, firstExceedingMaxLength],
   );
 
 
@@ -219,8 +254,13 @@ export default function CreateServiceRequestPage(): JSX.Element {
       !!catalogItemId &&
       !variables.isLoading &&
       !variables.isError &&
-      // Hot fix (mirrors the customer portal): all typable variables required.
+      // Required-ness now comes from each variable's own `mandatory` flag
+      // where the backend supplies one (see `isVariableRequired`), falling
+      // back to the old "every typable field required" hot fix only where
+      // it doesn't.
       firstEmptyRequired === null &&
+      firstExceedingMaxLength === null &&
+      firstFailingValidation === null &&
       !isIneligibleForSr &&
       // Fail closed while a selected project's eligibility is still loading
       // or couldn't be confirmed at all — see projectLoadFailed above.
@@ -235,6 +275,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
       variables.isLoading,
       variables.isError,
       firstEmptyRequired,
+      firstExceedingMaxLength,
+      firstFailingValidation,
       isIneligibleForSr,
       selectedProject.isLoading,
       projectLoadFailed,
@@ -410,7 +452,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 disabled={!deploymentId || deployedProducts.isLoading}
                 notched={deployedProductId !== ""}
               >
-                {(deployedProducts.data ?? []).map((dp) => (
+                {deployedProductOptions.map((dp) => (
                   <MenuItem key={dp.id} value={dp.id}>
                     {dp.label}
                   </MenuItem>
@@ -422,7 +464,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 <FormHelperText error>Failed to load deployed products.</FormHelperText>
               ) : deployedProducts.isLoading ? (
                 <FormHelperText>Loading products…</FormHelperText>
-              ) : (deployedProducts.data ?? []).length === 0 ? (
+              ) : deployedProductOptions.length === 0 ? (
                 <FormHelperText>No deployed products found for this deployment.</FormHelperText>
               ) : null}
             </FormControl>
@@ -556,9 +598,15 @@ export default function CreateServiceRequestPage(): JSX.Element {
             mt: 2.5,
           }}
         >
-          {firstEmptyRequired && !variables.isLoading && (
+          {!variables.isLoading && (firstEmptyRequired || firstExceedingMaxLength || firstFailingValidation) && (
             <Typography variant="caption" color="text.secondary" sx={{ mr: "auto" }}>
-              Required field: {firstEmptyRequired}
+              {firstEmptyRequired
+                ? `Required field: ${firstEmptyRequired}`
+                : firstExceedingMaxLength
+                  ? `${firstExceedingMaxLength.label} exceeds ${firstExceedingMaxLength.maxLength} characters`
+                  : firstFailingValidation
+                    ? `${firstFailingValidation.label}: ${firstFailingValidation.message}`
+                    : null}
             </Typography>
           )}
           <Button variant="outlined" onClick={() => navigate(backTarget)}>
