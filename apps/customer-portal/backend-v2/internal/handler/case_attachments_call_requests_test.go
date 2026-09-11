@@ -118,8 +118,9 @@ func TestCreateCallRequest_CaseIDFromPath(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if fake.gotCreateReq.CaseID != testCaseID {
-		t.Fatalf("CaseID = %q, want %q", fake.gotCreateReq.CaseID, testCaseID)
+	wantCaseID := toSysID(testCaseID)
+	if fake.gotCreateReq.CaseID != wantCaseID {
+		t.Fatalf("CaseID = %q, want %q", fake.gotCreateReq.CaseID, wantCaseID)
 	}
 }
 
@@ -143,8 +144,9 @@ func TestSearchCallRequests_CaseIDFromPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if fake.gotSearchReq.CaseID != testCaseID {
-		t.Fatalf("CaseID = %q, want %q", fake.gotSearchReq.CaseID, testCaseID)
+	wantCaseID := toSysID(testCaseID)
+	if fake.gotSearchReq.CaseID != wantCaseID {
+		t.Fatalf("CaseID = %q, want %q", fake.gotSearchReq.CaseID, wantCaseID)
 	}
 
 	var body struct {
@@ -187,7 +189,27 @@ func TestPatchCallRequest_ExtraCaseIDPathSegmentDoesNotBreakRouting(t *testing.T
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.ID != callRequestID {
-		t.Fatalf("id = %q, want %q (the {id} segment, not {caseId})", body.ID, callRequestID)
+	wantID := toSysID(callRequestID)
+	if body.ID != wantID {
+		t.Fatalf("id = %q, want %q (the {id} segment, not {caseId})", body.ID, wantID)
+	}
+}
+
+func TestPatchCallRequest_BareSysIDSupported(t *testing.T) {
+	fake := &fakeEntityCallRequestClient{}
+	h := NewCallRequestHandler(fake)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("PATCH /cases/{caseId}/call-requests/{id}", h.PatchCallRequest)
+
+	callRequestSysID := "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+	req := authedRequest(http.MethodPatch, "/cases/"+testCaseID+"/call-requests/"+callRequestSysID,
+		`{"stateKey":6}`)
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

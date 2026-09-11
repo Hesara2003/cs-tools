@@ -80,6 +80,10 @@ export const ApiQueryKeys = {
   INCIDENT_ACTIVITIES: "incident-activities",
   PROBLEMS: "problems",
   PROBLEM_DETAILS: "problem-details",
+  OUTAGES: "outages",
+  OUTAGE_DETAILS: "outage-details",
+  OUTAGE_METADATA: "outage-metadata",
+  OUTAGE_COMMUNICATIONS: "outage-communications",
   GROUPS_SEARCH: "groups-search",
   IT_SERVICES_SEARCH: "it-services-search",
   IT_SERVICE_NAMES: "it-service-names",
@@ -128,6 +132,7 @@ export const ApiQueryKeys = {
   CSM_CASE_UPDATE_REQUEST_TEMPLATES: "csm-case-update-request-templates",
   CSM_PROJECTS: "csm-projects",
   CSM_PROJECT_DETAIL: "csm-project-detail",
+  CSM_PROJECT_METADATA: "csm-project-metadata",
   CSM_ACCOUNTS: "csm-accounts",
   CSM_ACCOUNT_DETAIL: "csm-account-detail",
   CSM_ACCOUNT_PROJECTS: "csm-account-projects",
@@ -142,6 +147,7 @@ export const ApiQueryKeys = {
   CSM_ADMIN_TEAMS: "csm-admin-teams",
   CSM_ADMIN_TEAM_DETAIL: "csm-admin-team-detail",
   CSM_ADMIN_PERMISSIONS: "csm-admin-permissions",
+  CSM_GITHUB_ISSUE_REPO_OPTIONS: "csm-github-issue-repo-options",
 } as const;
 
 // Constants for API-related mutation keys.

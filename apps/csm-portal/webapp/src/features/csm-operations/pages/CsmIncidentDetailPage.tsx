@@ -23,7 +23,9 @@ import {
   Link as LinkIcon,
   MessageSquarePlus,
   Paperclip,
+  Megaphone,
   Pencil,
+  UserCog,
 } from "@wso2/oxygen-ui-icons-react";
 import {
   type JSX,
@@ -52,6 +54,9 @@ import EditIncidentDialog from "@features/csm-operations/components/EditIncident
 import EntityRefLink from "@features/csm-operations/components/EntityRefLink";
 import IncidentActionBar from "@features/csm-operations/components/IncidentActionBar";
 import IncidentResolutionDialog from "@features/csm-operations/components/IncidentResolutionDialog";
+import HandoffToSpecialistDialog from "@features/csm-operations/components/HandoffToSpecialistDialog";
+import SpecialistHandoffBadge from "@features/csm-operations/components/SpecialistHandoffBadge";
+import { useHandOffIncident } from "@features/csm-operations/api/useHandOffIncident";
 import {
   incidentCommentGateReason,
   incidentPriorityColor,
@@ -74,7 +79,11 @@ import {
 import type { CaseAttachment } from "@features/csm-cases/types/csmCases";
 import type {
   BeEntityRef,
+  BeHandoffEscalationTeam,
+  BeHandoffReasonCode,
   BeIncidentDetail,
+  BeIncidentHandoffResult,
+  BeIncidentResolutionCode,
   BeIncidentState,
   BeUpdateIncidentPayload,
 } from "@api/backend/types";
@@ -200,7 +209,12 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   });
   const { showError } = useErrorBanner();
   const patchIncident = usePatchIncident();
+  const handOffIncident = useHandOffIncident();
   const [editOpen, setEditOpen] = useState(false);
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  // Kept for the dialog's inline success/warning result, cleared whenever the
+  // dialog is reopened for a fresh attempt.
+  const [handoffResult, setHandoffResult] = useState<BeIncidentHandoffResult | null>(null);
   // Kept in the URL (`?tab=`), not local state, so a shared/bookmarked link
   // to a specific tab (e.g. Watchers) survives a refresh.
   const { activeTab, setActiveTab } = useQueryParamTabs<IncidentTabId>(
@@ -350,7 +364,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   );
 
   const onResolutionSubmit = useCallback(
-    (fields: { resolutionCode: string; resolutionNotes: string }) => {
+    (fields: { resolutionCode: BeIncidentResolutionCode; resolutionNotes: string }) => {
       if (!id || !resolutionTarget) return;
       patchIncident.mutate(
         { id, patch: { state: resolutionTarget, ...fields } },
@@ -369,6 +383,33 @@ export default function CsmIncidentDetailPage(): JSX.Element {
     [id, patchIncident, resolutionTarget, showError],
   );
 
+  /**
+   * Submit the handoff. Deliberately not gated on the incident's service or
+   * state here — the action is shown unconditionally (see the doc comment on
+   * `useHandOffIncident`) and any ineligibility comes back as a real `409`
+   * from the backend, surfaced through the page's error banner same as any
+   * other rejected write.
+   */
+  const onHandoffSubmit = useCallback(
+    (fields: { reasonCode: BeHandoffReasonCode; escalationTeam?: BeHandoffEscalationTeam }) => {
+      if (!id) return;
+      handOffIncident.mutate(
+        { incidentId: id, payload: fields },
+        {
+          onSuccess: (response) => setHandoffResult(response.handoff),
+          onError: (err) => {
+            const msg =
+              err instanceof BackendApiError && err.status < 500 && err.message
+                ? err.message
+                : "Could not hand off the incident. Please try again.";
+            showError(msg, err);
+          },
+        },
+      );
+    },
+    [id, handOffIncident, showError],
+  );
+
   const back = (): void => {
     navigate(backTarget);
   };
@@ -377,6 +418,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
     <Button
       variant="text"
       size="small"
+      className="csm-print-hide"
       startIcon={<ArrowLeft size={16} />}
       onClick={back}
       sx={{ alignSelf: "flex-start" }}
@@ -418,6 +460,15 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   }
 
   const incident = data;
+  // The escalation-team select only ever has an effect for a Choreo-family
+  // incident (see `CHANGES-incident-handoff.md` §1.1: `escalationTeam` is
+  // read by the backend only when routing to the Choreo branch). There is no
+  // structured "business service family" field on the incident read model,
+  // so this goes off the service name the same way the rest of this page's
+  // Choreo/Asgardeo-specific copy would have to — a heuristic, not a gate:
+  // the select is purely a convenience, and submitting it for a non-Choreo
+  // incident is harmless (the backend just ignores it).
+  const isChoreoService = /choreo/i.test(incident.service?.name ?? "");
   const hasLinks = !!(incident.parent || incident.changeRequest || incident.problem || incident.causedBy);
   const hasLinkedServiceRequests =
     !!incident.linkedServiceRequests && incident.linkedServiceRequests.length > 0;
@@ -475,12 +526,39 @@ export default function CsmIncidentDetailPage(): JSX.Element {
           <Typography variant="h5">{incident.subject || "Incident"}</Typography>
         </Box>
         <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Box className="csm-print-hide" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <IncidentActionBar
               incident={incident}
               isPending={patchIncident.isPending}
               onAction={onIncidentAction}
             />
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<UserCog size={14} />}
+              onClick={() => {
+                setHandoffResult(null);
+                setHandoffOpen(true);
+              }}
+            >
+              Escalate to specialist team
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<Megaphone size={14} />}
+              onClick={() =>
+                navigate("/operations/outages/new", {
+                  state: {
+                    from: `/operations/incidents/${incident.id}`,
+                    incidentId: incident.id,
+                    configurationItemId: incident.configurationItem?.id,
+                  },
+                })
+              }
+            >
+              Create outage
+            </Button>
             <Button
               variant="outlined"
               size="small"
@@ -492,6 +570,13 @@ export default function CsmIncidentDetailPage(): JSX.Element {
           </Box>
         </Box>
       </Box>
+
+      {incident.specialistHandoff && (
+        <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
+          <Typography variant="subtitle2">Specialist handoff</Typography>
+          <SpecialistHandoffBadge handoff={incident.specialistHandoff} />
+        </Card>
+      )}
 
       <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
         <Typography variant="subtitle2">Overview</Typography>
@@ -523,7 +608,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         </Box>
       </Card>
 
-      <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+      <Box className="csm-print-hide" sx={{ borderBottom: 1, borderColor: "divider" }}>
         <Tabs
           value={activeTab}
           onChange={(_, v) => setActiveTab(v as IncidentTabId)}
@@ -554,7 +639,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
       {activeTab === "activities" && (
         <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
           {composerOpen ? (
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+            <Box className="csm-print-hide" sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
               <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <Typography variant="subtitle2">Reply</Typography>
                 <Button
@@ -599,6 +684,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
               fullWidth
               variant="outlined"
               color="inherit"
+              className="csm-print-hide"
               startIcon={<MessageSquarePlus size={18} />}
               onClick={() => setComposerOpen(true)}
               sx={{ justifyContent: "flex-start", textTransform: "none", py: 1.5, px: 2 }}
@@ -812,6 +898,18 @@ export default function CsmIncidentDetailPage(): JSX.Element {
             if (!patchIncident.isPending) setResolutionTarget(null);
           }}
           onSubmit={onResolutionSubmit}
+        />
+      )}
+
+      {handoffOpen && (
+        <HandoffToSpecialistDialog
+          showTeamSelect={isChoreoService}
+          isSubmitting={handOffIncident.isPending}
+          result={handoffResult}
+          onClose={() => {
+            if (!handOffIncident.isPending) setHandoffOpen(false);
+          }}
+          onSubmit={onHandoffSubmit}
         />
       )}
     </Box>

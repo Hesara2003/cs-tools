@@ -248,7 +248,9 @@ type snCase struct {
 	// not declared here, so encoding/json discarded them. All nullable: an
 	// absent key stays nil rather than becoming a zero value.
 	SLAResponseTime       *string          `json:"slaResponseTime"`
+	ClosedOn              *string          `json:"closedOn"`
 	ClosedBy              *snCaseEntityRef `json:"closedBy"`
+	CloseNotes            *string          `json:"closeNotes"`
 	HasAutoClosed         *bool            `json:"hasAutoClosed"`
 	EngagementStartDate   *string          `json:"engagementStartDate"`
 	EngagementEndDate     *string          `json:"engagementEndDate"`
@@ -520,6 +522,9 @@ type snCaseFilters struct {
 	CaseTypes          []string `json:"caseTypes"`
 	SearchQuery        string   `json:"searchQuery,omitempty"`
 	ProjectIDs         []string `json:"projectIds,omitempty"`
+	// ExcludeProjectIDs is the inverse of ProjectIDs: cases whose project is
+	// none of these. See domain.ParsedCaseFilters.ExcludeProjectIDs.
+	ExcludeProjectIDs  []string `json:"excludeProjectIds,omitempty"`
 	DeploymentIDs      []string `json:"deploymentIds,omitempty"`
 	DeployedProductIDs []string `json:"deployedProductIds,omitempty"`
 	StateKeys          []int    `json:"stateKeys,omitempty"`
@@ -590,7 +595,10 @@ type snCaseFilters struct {
 	CreTeamIDs []string `json:"integrationCsTeamIds,omitempty"`
 	SreTeamIDs []string `json:"sreTeamIds,omitempty"`
 	// AccountIDs: see domain.ParsedCaseFilters.AccountIDs doc comment.
-	AccountIDs           []string `json:"accountIds,omitempty"`
+	AccountIDs []string `json:"accountIds,omitempty"`
+	// ExcludeAccountIDs is the inverse of AccountIDs: cases whose parent
+	// account is none of these. See domain.ParsedCaseFilters.ExcludeAccountIDs.
+	ExcludeAccountIDs    []string `json:"excludeAccountIds,omitempty"`
 	Unassigned           bool     `json:"unassigned,omitempty"`
 	ResolutionNotesEmpty bool     `json:"resolutionNotesEmpty,omitempty"`
 	// TaskSLAFilter: SN-side join on Task SLA table, filtering by businessElapsedPercent
@@ -946,8 +954,8 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 
 	if len(req.WatchList) > 0 {
 		// The backing service's case-create payload declares the watch list as
-		// email addresses, not user ids, so the incoming platform UUIDs are
-		// resolved to emails first.
+		// email addresses. Incoming emails are forwarded as-is; platform UUIDs
+		// are resolved to emails first.
 		emails, err := watchListEmails(ctx, s.client, token, "watchList", req.WatchList)
 		if err != nil {
 			return domain.CreateCaseResponse{}, err
@@ -1593,6 +1601,13 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 		}
 		cv.ResolvedOn = &resolvedOn
 	}
+	if c.ClosedOn != nil && *c.ClosedOn != "" {
+		closedOn, err := parseSNDateTime(ctx, "sn get case", "closedOn", *c.ClosedOn)
+		if err != nil {
+			return domain.CaseView{}, fmt.Errorf("sn get case: parse closedOn %q: %w", *c.ClosedOn, err)
+		}
+		cv.ClosedOn = &closedOn
+	}
 	if len(c.WatchList) > 0 {
 		wl := make([]domain.WatchListUser, 0, len(c.WatchList))
 		for _, u := range c.WatchList {
@@ -1647,6 +1662,7 @@ func (s *snCaseService) GetCaseByID(ctx context.Context, id string) (domain.Case
 	if c.ClosedBy != nil {
 		cv.ClosedBy = &domain.EntityRef{ID: sysidToUUID(c.ClosedBy.ID), Name: c.ClosedBy.Name}
 	}
+	cv.CloseNotes = c.CloseNotes
 	if c.EngagementPaymentType != nil && c.EngagementPaymentType.Label != "" {
 		cv.EngagementPaymentType = &c.EngagementPaymentType.Label
 	}
@@ -2369,7 +2385,8 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	}
 	if req.WatchList != nil {
 		// As on create, the backing service's case-update payload declares the
-		// watch list as email addresses, and it replaces the whole list, so an
+		// watch list as email addresses (incoming emails forwarded as-is;
+		// platform UUIDs resolved first), and it replaces the whole list, so an
 		// explicitly empty list must still be sent to clear it rather than be
 		// skipped.
 		emails, err := watchListEmails(ctx, s.client, token, "watchList", *req.WatchList)
@@ -3471,6 +3488,7 @@ func buildSNCaseFilters(parsed domain.ParsedCaseFilters, searchQuery string) snC
 		CaseTypes:                        snCaseTypes,
 		SearchQuery:                      searchQuery,
 		ProjectIDs:                       uuidsToSysids(parsed.ProjectIDs),
+		ExcludeProjectIDs:                uuidsToSysids(parsed.ExcludeProjectIDs),
 		DeploymentIDs:                    uuidsToSysids(parsed.DeploymentIDs),
 		StateKeys:                        domainStatesToSNIDs(parsed.States),
 		ExcludeStates:                    domainStatesToSNIDs(parsed.ExcludeStates),
@@ -3501,6 +3519,7 @@ func buildSNCaseFilters(parsed domain.ParsedCaseFilters, searchQuery string) snC
 		CreTeamIDs:                       uuidsToSysids(parsed.CreTeamIDs),
 		SreTeamIDs:                       uuidsToSysids(parsed.SreTeamIDs),
 		AccountIDs:                       uuidsToSysids(parsed.AccountIDs),
+		ExcludeAccountIDs:                uuidsToSysids(parsed.ExcludeAccountIDs),
 		Unassigned:                       parsed.Unassigned,
 		ResolutionNotesEmpty:             parsed.ResolutionNotesEmpty,
 		TaskSLAFilter:                    buildSNTaskSLAFilter(parsed.TaskSLAFilter),
@@ -3574,6 +3593,9 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		return domain.SearchCasesResponse{}, err
 	}
 	if err := validateUUIDs("accountId", req.Parsed.AccountIDs); err != nil {
+		return domain.SearchCasesResponse{}, err
+	}
+	if err := validateUUIDs("accountId", req.Parsed.ExcludeAccountIDs); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
 
@@ -3895,6 +3917,9 @@ func (s *snCaseService) AggregateCases(ctx context.Context, req domain.Aggregate
 		return domain.AggregateResponse{}, err
 	}
 	if err := validateUUIDs("accountId", parsed.AccountIDs); err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	if err := validateUUIDs("accountId", parsed.ExcludeAccountIDs); err != nil {
 		return domain.AggregateResponse{}, err
 	}
 	for _, t := range parsed.Types {
