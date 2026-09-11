@@ -81,6 +81,11 @@ const (
 	ErrMsgCaseClosedForAttachmentCreate = "Cannot add attachments to a closed case."
 	ErrMsgCaseClosedForAttachmentUpdate = "Cannot update attachments on a closed case."
 	ErrMsgCaseClosedForAttachmentDelete = "Cannot delete attachments from a closed case."
+
+	// Closed-case feedback guard. Matches the Ballerina backend's
+	// ERR_MSG_CASE_NOT_CLOSED_FOR_FEEDBACK constant so both backends reject
+	// non-closed cases with the same message.
+	ErrMsgCaseNotClosedForFeedback = "Cannot submit feedback for a case that is not closed."
 )
 
 // errorBody is the JSON error payload format matching the customer-portal pattern.

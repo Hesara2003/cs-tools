@@ -18,42 +18,52 @@ package dto
 
 import "testing"
 
-// TestIsCaseStateClosed pins the three representations a case state reaches
-// this helper as — entity-service's domain enum, ServiceNow's display text,
-// and the numeric SN choice-list id the frontend still speaks — and, just as
-// importantly, that no other state is mistaken for closed. The closed-case
-// attachment guards in internal/handler decide whether to reject a write on
-// this answer alone, so a false positive silently blocks a customer from
-// attaching a file to a live case.
 func TestIsCaseStateClosed(t *testing.T) {
-	closed := map[string]string{
-		"domain enum":           "closed",
-		"ServiceNow label":      "Closed",
-		"uppercase":             "CLOSED",
-		"padded":                "  closed  ",
-		"ServiceNow numeric id": "3",
-	}
-	for name, state := range closed {
-		if !IsCaseStateClosed(state) {
-			t.Errorf("%s: IsCaseStateClosed(%q) = false, want true", name, state)
-		}
+	cases := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		// Closed representations
+		{name: "domain enum closed", input: "closed", expected: true},
+		{name: "display label Closed", input: "Closed", expected: true},
+		{name: "uppercase CLOSED", input: "CLOSED", expected: true},
+		{name: "choice list id 3", input: "3", expected: true},
+		{name: "padded closed", input: "  closed  ", expected: true},
+		{name: "padded id 3", input: " 3 ", expected: true},
+
+		// Non-closed representations (domain enum, display label, and numeric id)
+		{name: "domain enum open", input: "open", expected: false},
+		{name: "display label Open", input: "Open", expected: false},
+		{name: "choice list id 1 (open)", input: "1", expected: false},
+		{name: "domain enum work_in_progress", input: "work_in_progress", expected: false},
+		{name: "display label Work In Progress", input: "Work In Progress", expected: false},
+		{name: "choice list id 2 (wip)", input: "2", expected: false},
+		{name: "domain enum waiting_on_wso2", input: "waiting_on_wso2", expected: false},
+		{name: "choice list id 10 (waiting on wso2)", input: "10", expected: false},
+		{name: "domain enum awaiting_info", input: "awaiting_info", expected: false},
+		{name: "choice list id 11 (awaiting info)", input: "11", expected: false},
+		{name: "domain enum solution_proposed", input: "solution_proposed", expected: false},
+		{name: "display label Solution Proposed", input: "Solution Proposed", expected: false},
+		{name: "choice list id 6 (solution proposed)", input: "6", expected: false},
+		{name: "domain enum reopened", input: "reopened", expected: false},
+		{name: "choice list id 13 (reopened)", input: "13", expected: false},
+
+		// Edge cases
+		{name: "empty string", input: "", expected: false},
+		{name: "whitespace only", input: "   ", expected: false},
+		{name: "unknown string", input: "foobar", expected: false},
+		{name: "unknown id", input: "999", expected: false},
+		{name: "substring of a closed label", input: "close", expected: false},
+		{name: "closed-looking longer string", input: "closed_pending_review", expected: false},
 	}
 
-	open := map[string]string{
-		"empty":                        "",
-		"open":                         "open",
-		"work in progress enum":        "work_in_progress",
-		"work in progress label":       "Work In Progress",
-		"solution proposed":            "solution_proposed",
-		"reopened":                     "reopened",
-		"open's numeric id":            "1",
-		"unknown state":                "on_hold",
-		"substring of a closed label":  "close",
-		"closed-looking longer string": "closed_pending_review",
-	}
-	for name, state := range open {
-		if IsCaseStateClosed(state) {
-			t.Errorf("%s: IsCaseStateClosed(%q) = true, want false", name, state)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsCaseStateClosed(tc.input)
+			if got != tc.expected {
+				t.Fatalf("IsCaseStateClosed(%q) = %v, want %v", tc.input, got, tc.expected)
+			}
+		})
 	}
 }

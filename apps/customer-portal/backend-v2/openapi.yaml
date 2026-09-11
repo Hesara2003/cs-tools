@@ -3933,6 +3933,9 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
     post:
       summary: Submit feedback for a case.
+      description: >
+        Rejected with 400 when the case is not closed: feedback can only be
+        submitted for closed cases.
       operationId: postCasesIdFeedback
       parameters:
         - name: id
@@ -6860,8 +6863,6 @@ components:
         resolutionCode:
           type: string
         cause:
-          type: string
-        closeNotes:
           type: string
         resolvedOn:
           type: string

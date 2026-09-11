@@ -223,7 +223,7 @@ const caseStateClosed = "closed"
 // active data source (see SearchCaseView's doc comment); the id form is
 // accepted so a caller holding a portal-facing status id resolves the same way.
 //
-// Exported because the closed-case write guards live in internal/handler but
+// Exported because the case write guards live in internal/handler but
 // the state vocabulary they need lives here, alongside the tables it is keyed
 // on — a handler must never re-hardcode "closed"/"3" itself.
 func IsCaseStateClosed(state string) bool {
