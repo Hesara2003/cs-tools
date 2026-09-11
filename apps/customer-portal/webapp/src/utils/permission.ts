@@ -295,7 +295,7 @@ export function isProjectContractEnded(
   if (!trimmed) return false;
 
   // Handle YYYY-MM-DD format
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
   if (match) {
     const endOfYear = Number(match[1]);
     const endOfMonth = Number(match[2]) - 1;

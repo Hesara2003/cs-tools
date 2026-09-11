@@ -253,6 +253,8 @@ describe("isProjectContractEnded", () => {
     const now = new Date("2026-09-09T12:00:00.000Z");
     expect(isProjectContractEnded("2026-04-26T23:59:59.000Z", now)).toBe(true);
     expect(isProjectContractEnded("2026-10-01T00:00:00.000Z", now)).toBe(false);
+    expect(isProjectContractEnded("2026-09-09T00:00:00.000Z", now)).toBe(true);
+    expect(isProjectContractEnded("2026-09-09T18:00:00.000Z", now)).toBe(false);
   });
 
   it("returns false for invalid date strings and calendar-invalid dates", () => {
