@@ -16,7 +16,11 @@
 
 package dto
 
-import "github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
+import (
+	"strings"
+
+	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
+)
 
 // CallRequestCreateResponse is the portal's response for POST /call-requests.
 type CallRequestCreateResponse struct {
@@ -27,10 +31,14 @@ type CallRequestCreateResponse struct {
 
 // MapCallRequestCreate builds the portal response from entity-service's CreateCallRequestResponse.
 func MapCallRequestCreate(r entity.CreateCallRequestResponse) CallRequestCreateResponse {
+	state := r.CallRequest.State.Label
+	if state == "" {
+		state = r.CallRequest.State.ID
+	}
 	return CallRequestCreateResponse{
 		ID:        r.CallRequest.ID,
 		CreatedOn: r.CallRequest.CreatedOn,
-		State:     r.CallRequest.State,
+		State:     state,
 	}
 }
 
@@ -91,6 +99,13 @@ type CallRequestSearchRequest struct {
 	Pagination entity.Pagination        `json:"pagination"`
 }
 
+// toSysID converts an identifier (either a dashed UUID or a 32-hex sysid)
+// to a 32-character lowercase hex string without hyphens, for upstream services
+// that enforce ServiceNow's 32-hex IdString pattern constraint.
+func toSysID(id string) string {
+	return strings.ToLower(strings.ReplaceAll(id, "-", ""))
+}
+
 // BuildEntitySearchCallRequestsRequest translates the portal's request into
 // entity-service's SearchCallRequestsRequest. caseID (the {caseId} path
 // parameter) is always forced, never taken from the request body — the
@@ -109,7 +124,7 @@ func BuildEntitySearchCallRequestsRequest(caseID string, req CallRequestSearchRe
 		filters = &entity.SearchCallRequestsFilters{States: states}
 	}
 	return entity.SearchCallRequestsRequest{
-		CaseID:     caseID,
+		CaseID:     toSysID(caseID),
 		Filters:    filters,
 		Pagination: req.Pagination,
 	}

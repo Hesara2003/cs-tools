@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/apierror"
 )
@@ -45,6 +46,18 @@ var uuidRe = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 // sysidRe matches a bare ServiceNow sysid: 32 hex characters, no dashes.
 var sysidRe = regexp.MustCompile(`(?i)^[0-9a-f]{32}$`)
 
+// toSysID converts an identifier (either a dashed UUID or a 32-hex sysid)
+// to a 32-character lowercase hex string without hyphens, for upstream services
+// that enforce ServiceNow's 32-hex IdString pattern constraint.
+func toSysID(id string) string {
+	return strings.ToLower(strings.ReplaceAll(id, "-", ""))
+}
+
+// isUUIDOrSysID reports whether id is a valid UUID or bare 32-hex ServiceNow sysid.
+func isUUIDOrSysID(id string) bool {
+	return uuidRe.MatchString(id) || sysidRe.MatchString(id)
+}
+
 // isAttachmentID reports whether id is a usable attachment identifier — either a
 // dashed UUID or a bare ServiceNow sysid.
 //
@@ -60,7 +73,7 @@ var sysidRe = regexp.MustCompile(`(?i)^[0-9a-f]{32}$`)
 // the same contract while still refusing anything that is neither shape, so the
 // value remains safe to place in an upstream URL path.
 func isAttachmentID(id string) bool {
-	return uuidRe.MatchString(id) || sysidRe.MatchString(id)
+	return isUUIDOrSysID(id)
 }
 
 // Error message constants matching the customer-portal error vocabulary.
