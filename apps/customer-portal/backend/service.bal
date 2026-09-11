@@ -2456,6 +2456,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # Submit feedback for a specific case.
     #
     # + id - ID of the case
+    # + payload - Submitted feedback payload
     # + return - Submitted feedback response or error response
     resource function post cases/[entity:IdString id]/feedback(http:RequestContext ctx,
             types:CaseFeedbackPayload payload)
@@ -2466,6 +2467,16 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             return <http:InternalServerError>{
                 body: {
                     message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
+                }
+            };
+        }
+
+        entity:CaseResponse|error caseResponse = entity:getCase(userInfo.idToken, id);
+        if caseResponse is entity:CaseResponse && !isCaseClosed(caseResponse) {
+            log:printWarn(string `User: ${userInfo.userId} attempted to submit feedback for non-closed case: ${id}`);
+            return <http:BadRequest>{
+                body: {
+                    message: ERR_MSG_CASE_NOT_CLOSED_FOR_FEEDBACK
                 }
             };
         }
@@ -2545,6 +2556,16 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             };
         }
 
+        entity:CaseResponse|error caseResponse = entity:getCase(userInfo.idToken, id);
+        if caseResponse is entity:CaseResponse && isCaseClosed(caseResponse) {
+            log:printWarn(string `User: ${userInfo.userId} attempted to add attachment to closed case: ${id}`);
+            return <http:BadRequest>{
+                body: {
+                    message: ERR_MSG_CASE_CLOSED_FOR_ATTACHMENT_CREATE
+                }
+            };
+        }
+
         entity:AttachmentCreateResponse|error createdAttachmentResponse = entity:createAttachment(userInfo.idToken,
                 {
                     referenceId: id,
@@ -2620,6 +2641,16 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
             return <http:BadRequest>{
                 body: {
                     message: validateAttachmentUpdatePayload
+                }
+            };
+        }
+
+        entity:CaseResponse|error caseResponse = entity:getCase(userInfo.idToken, caseId);
+        if caseResponse is entity:CaseResponse && isCaseClosed(caseResponse) {
+            log:printWarn(string `User: ${userInfo.userId} attempted to update attachment on closed case: ${caseId}`);
+            return <http:BadRequest>{
+                body: {
+                    message: ERR_MSG_CASE_CLOSED_FOR_ATTACHMENT_UPDATE
                 }
             };
         }
@@ -2786,7 +2817,7 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
     # + id - ID of the attachment
     # + return - Success message or error response
     resource function delete attachments/[entity:IdString id](http:RequestContext ctx)
-        returns http:Ok|http:Unauthorized|http:Forbidden|http:NotFound|http:InternalServerError {
+        returns http:Ok|http:BadRequest|http:Unauthorized|http:Forbidden|http:NotFound|http:InternalServerError {
 
         authorization:UserInfoPayload|error userInfo = ctx.getWithType(authorization:HEADER_USER_INFO);
         if userInfo is error {
@@ -2795,6 +2826,22 @@ service http:InterceptableService / on new http:Listener(9090, listenerConf) {
                     message: ERR_MSG_USER_INFO_HEADER_NOT_FOUND
                 }
             };
+        }
+
+        entity:AttachmentResponse|error attachment = entity:getAttachment(userInfo.idToken, id);
+        if attachment is entity:AttachmentResponse {
+            string referenceId = attachment.referenceId;
+            if referenceId != "" {
+                entity:CaseResponse|error caseResponse = entity:getCase(userInfo.idToken, referenceId);
+                if caseResponse is entity:CaseResponse && isCaseClosed(caseResponse) {
+                    log:printWarn(string `User: ${userInfo.userId} attempted to delete attachment: ${id} from closed case: ${referenceId}`);
+                    return <http:BadRequest>{
+                        body: {
+                            message: ERR_MSG_CASE_CLOSED_FOR_ATTACHMENT_DELETE
+                        }
+                    };
+                }
+            }
         }
 
         entity:AttachmentDeleteResponse|error response = entity:deleteAttachment(userInfo.idToken, id);

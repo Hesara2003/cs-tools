@@ -2010,6 +2010,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <Button
+          className="csm-print-hide"
           variant="text"
           size="small"
           startIcon={<ArrowLeft size={16} />}
@@ -2030,6 +2031,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <Button
+          className="csm-print-hide"
           variant="text"
           size="small"
           startIcon={<ArrowLeft size={16} />}
@@ -2096,6 +2098,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
       <Button
         variant="text"
         size="small"
+        className="csm-print-hide"
         startIcon={<ArrowLeft size={16} />}
         onClick={() => navigate(resolvedBackPath)}
         sx={{ alignSelf: "flex-start" }}
@@ -2219,7 +2222,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
           <Typography variant="h5">{c.subject}</Typography>
         </Box>
         {!isAnnouncement && (
-          <Box sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}>
+          <Box
+            className="csm-print-hide"
+            sx={{ flexShrink: 0, alignSelf: { xs: "stretch", md: "flex-start" } }}
+          >
             <CaseActionBar
               caseDetail={c}
               onAction={onAction}
@@ -2267,7 +2273,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
         </Box>
       )}
 
-      <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+      <Box className="csm-print-hide" sx={{ borderBottom: 1, borderColor: "divider" }}>
         <Tabs
           value={activeTab}
           onChange={(_, v) => setActiveTab(v as CaseTabId)}
@@ -2337,7 +2343,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
               that hides case-lifecycle patch actions, which don't apply to an
               announcement, not the ability to reply to one. */}
           {composerOpen ? (
-            <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
+            <Card
+              className="csm-print-hide"
+              sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}
+            >
               <Box
                 sx={{
                   display: "flex",
@@ -2373,7 +2382,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 onDraftInternalChange={setDraftInternal}
                 draftSourceMode={draftSourceMode}
                 onDraftSourceModeChange={setDraftSourceMode}
-                onSubmit={async (bodyHtml, internal, commentAttachments) => {
+                onSubmit={async (bodyHtml, internal, commentAttachments, mentionedUserIds) => {
                   if (!caseId) return;
                   // Post the comment only when there's text; an attachment-only
                   // send skips the comment endpoint and just uploads the files.
@@ -2388,6 +2397,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                       bodyHtml,
                       authorName: engineerName,
                       internal,
+                      mentionedUserIds,
                     });
                   }
                   // Attachments are case-level (no comment linkage on the BE);
@@ -2415,6 +2425,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
               fullWidth
               variant="outlined"
               color="inherit"
+              className="csm-print-hide"
               disabled={isClosed}
               startIcon={<MessageSquarePlus size={18} />}
               onClick={() => setComposerOpen(true)}
@@ -2856,10 +2867,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
           currentSeverity={c.severity}
           hasAttachments={attachmentList.length > 0}
           currentProjectName={c.projectName}
-          // Service Request is gated to Managed Cloud / Cloud Support projects —
-          // caseProject is the same project fetch already used above (Customer
-          // card, ChangeSeverityDialog's isManagedCloud, showRepoField).
-          currentProjectSubscriptionType={caseProject?.subscriptionType}
           currentDeploymentName={c.productContext.deployment}
           currentProductName={c.productContext.product}
           currentWatchers={c.watchers}

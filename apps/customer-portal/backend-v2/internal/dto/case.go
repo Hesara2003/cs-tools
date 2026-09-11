@@ -317,13 +317,11 @@ type CaseWatchListUser struct {
 //
 // Deliberately excludes entity-service's AutoclosureStep/AutoclosureStateTime
 // and BestCaseFixEta/MostLikelyFixEta/WorstCaseFixEta — genuinely
-// CSM-engineer-facing only. SlaResponseTime, CsManager, ClosedBy,
-// CloseNotes (on this read path — it does exist on the PATCH response),
-// HasAutoClosed, FindingsResolved/FindingsTotal, EscalationLevel/
-// IsEscalated, Duration, EngagementStartDate/EngagementEndDate, and
-// Variables are all present on the frontend's type but have no
-// entity-service equivalent at all on CaseView — not fixable in this dto
-// layer alone.
+// CSM-engineer-facing only. CsManager and FindingsResolved/FindingsTotal
+// have no entity-service equivalent on CaseView. CloseNotes is deliberately
+// NOT exposed here even though entity-service's CaseView carries it (GET path)
+// as well as PATCH: it is an internal CS-agent close note, never meant for
+// the customer-facing view.
 type CaseDetails struct {
 	ID                    string                       `json:"id"`
 	InternalID            string                       `json:"internalId"`
@@ -666,7 +664,6 @@ type CaseUpdateResponse struct {
 	AssignedTo     *PersonRef `json:"assignedTo,omitempty"`
 	ResolutionCode *string    `json:"resolutionCode,omitempty"`
 	Cause          *string    `json:"cause,omitempty"`
-	CloseNotes     *string    `json:"closeNotes,omitempty"`
 	ResolvedOn     *time.Time `json:"resolvedOn,omitempty"`
 	ParentCase     *NumberRef `json:"parentCase,omitempty"`
 	FixEta         *time.Time `json:"fixEta,omitempty"`
@@ -703,7 +700,6 @@ func MapCaseUpdate(r entity.UpdateCaseResponse) CaseUpdateResponse {
 		AssignedTo:     assignedTo,
 		ResolutionCode: c.ResolutionCode,
 		Cause:          c.Cause,
-		CloseNotes:     c.CloseNotes,
 		ResolvedOn:     c.ResolvedOn,
 		ParentCase:     mapNumberRef(c.ParentCase),
 		FixEta:         c.FixEta,

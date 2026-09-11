@@ -18,6 +18,7 @@ package entity
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 )
 
@@ -785,6 +786,7 @@ type CaseView struct {
 	// Nullable throughout — nil means the upstream gave no value.
 	SLAResponseTime       *string    `json:"slaResponseTime"`
 	ClosedBy              *EntityRef `json:"closedBy"`
+	CloseNotes            *string    `json:"closeNotes"`
 	HasAutoClosed         *bool      `json:"hasAutoClosed"`
 	EngagementStartDate   *string    `json:"engagementStartDate"`
 	EngagementEndDate     *string    `json:"engagementEndDate"`
@@ -1707,10 +1709,10 @@ type CreateCallRequestRequest struct {
 
 // CallRequestCreated carries the key fields of a newly created call request.
 type CallRequestCreated struct {
-	ID        string `json:"id"`
-	CreatedOn string `json:"createdOn"`
-	CreatedBy string `json:"createdBy"`
-	State     string `json:"state"`
+	ID        string           `json:"id"`
+	CreatedOn string           `json:"createdOn"`
+	CreatedBy string           `json:"createdBy"`
+	State     CallRequestState `json:"state"`
 }
 
 // CreateCallRequestResponse is entity-service's response for POST /call-requests.
@@ -1719,11 +1721,51 @@ type CreateCallRequestResponse struct {
 	CallRequest CallRequestCreated `json:"callRequest"`
 }
 
-// CallRequestState holds the state of a call request: ID is the string state
-// enum key, Label is the human-readable display label.
+// CallRequestState holds the state of a call request: ID is the state
+// enum key or numeric choice key string, Label is the human-readable display label.
 type CallRequestState struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
+}
+
+// UnmarshalJSON handles string enum, numeric choice key, or ChoiceListItem object formats.
+func (s *CallRequestState) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	// Case 1: Raw string enum (e.g. "pending_on_wso2")
+	if data[0] == '"' {
+		var str string
+		if err := json.Unmarshal(data, &str); err != nil {
+			return err
+		}
+		s.ID = str
+		s.Label = str
+		return nil
+	}
+	// Case 2: Object with ID (int or string) and Label (e.g. {"id": 2, "label": "Pending on WSO2"})
+	var raw struct {
+		ID    json.RawMessage `json:"id"`
+		Label string          `json:"label"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	s.Label = raw.Label
+	if len(raw.ID) > 0 {
+		var num int
+		if err := json.Unmarshal(raw.ID, &num); err == nil {
+			s.ID = strconv.Itoa(num)
+		} else {
+			var str string
+			if err := json.Unmarshal(raw.ID, &str); err == nil {
+				s.ID = str
+			} else {
+				s.ID = string(raw.ID)
+			}
+		}
+	}
+	return nil
 }
 
 // CallRequestCaseRef is a reference to a case embedded in a call request.

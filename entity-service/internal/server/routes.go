@@ -41,12 +41,20 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 	userSvc := service.NewUserService(userRepo)
 	userHandler := handler.NewUserHandler(userSvc)
 
-	// event_publish_failures has no ServiceNow equivalent — always backed by
-	// Postgres regardless of cfg.DataSource, same as the pool itself (see
-	// db.NewPool's call site in cmd/api/main.go).
-	eventPublishFailureRepo := repository.NewEventPublishFailureRepository(db)
-	eventPublishFailureSvc := service.NewEventPublishFailureService(eventPublishFailureRepo)
-	eventPublishFailureHandler := handler.NewEventPublishFailureHandler(eventPublishFailureSvc)
+	// event_publish_failures, sla_clocks, and scheduled_task_run have no
+	// ServiceNow equivalent. They are Postgres-backed and registered only
+	// when a pool is available (db.NewPoolIfNeeded returns nil for
+	// DATA_SOURCE=servicenow so local SN-mode startups are not blocked).
+	var eventPublishFailureHandler *handler.EventPublishFailureHandler
+	var eventPublishFailureSvc service.EventPublishFailureService
+	var slaClockHandler *handler.SLAClockHandler
+	var scheduledTaskRunHandler *handler.ScheduledTaskRunHandler
+	if db != nil {
+		eventPublishFailureSvc = service.NewEventPublishFailureService(repository.NewEventPublishFailureRepository(db))
+		eventPublishFailureHandler = handler.NewEventPublishFailureHandler(eventPublishFailureSvc)
+		slaClockHandler = handler.NewSLAClockHandler(service.NewSLAClockService(repository.NewSLAClockRepository(db)))
+		scheduledTaskRunHandler = handler.NewScheduledTaskRunHandler(service.NewScheduledTaskRunService(repository.NewScheduledTaskRunRepository(db)))
+	}
 
 	// EventPublisherService is optional, like every ServiceNow-only
 	// dependency below — gated on EventHubBroker rather than cfg.DataSource,
@@ -55,7 +63,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 	// EventPublishingEnabled, a separate safe-by-default kill switch: Event
 	// Hub can be fully configured and this still stays nil until that's
 	// explicitly turned on. nil when unset; every caller (snCaseService,
-	// snIncidentService) already handles that.
+	// snIncidentService) already handles that. eventPublishFailureSvc is
+	// nil without a pool; Publish then skips durable recording.
 	var eventPublisher service.EventPublisherService
 	if cfg.EventHubBroker != "" && cfg.EventPublishingEnabled {
 		eventPublisher = service.NewEventPublisherService(
@@ -67,18 +76,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 			eventPublishFailureSvc,
 		)
 	}
-
-	// sla_clocks has no ServiceNow equivalent either — same reasoning as
-	// event_publish_failures above.
-	slaClockRepo := repository.NewSLAClockRepository(db)
-	slaClockHandler := handler.NewSLAClockHandler(service.NewSLAClockService(slaClockRepo))
-
-	// scheduled_task_run has no ServiceNow equivalent either — same
-	// reasoning as sla_clocks/event_publish_failures above. Backs
-	// operations/csm-scheduled-tasks; see that component's own CLAUDE.md
-	// and this service's CLAUDE.md ("Scheduled task runs").
-	scheduledTaskRunRepo := repository.NewScheduledTaskRunRepository(db)
-	scheduledTaskRunHandler := handler.NewScheduledTaskRunHandler(service.NewScheduledTaskRunService(scheduledTaskRunRepo))
 
 	accountRepo := repository.NewAccountRepository(db)
 	accountHandler := handler.NewAccountHandler(service.NewAccountService(accountRepo))
@@ -185,12 +182,18 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		caseGithubIssueHandler = handler.NewCaseGithubIssueHandler(service.NewServiceNowCaseGithubIssueService(serviceNowIntegrationServiceClient, activeCaseSvc))
 	}
 
-	var caseEscalationHandler *handler.CaseEscalationHandler
+	// Case escalations are a ServiceNow-only entity, but the routes are
+	// registered for both data sources -- see the taskHandler comment above
+	// for why an unregistered route (bare 404) is the wrong shape for a
+	// feature the OpenAPI spec documents a 503 ErrorResponse for. The
+	// Postgres stand-in supplies that 503.
+	var activeCaseEscalationSvc service.CaseEscalationService
 	if cfg.DataSource == config.DataSourceServiceNow {
-		caseEscalationHandler = handler.NewCaseEscalationHandler(
-			service.NewCaseEscalationService(service.NewServiceNowEscalationService(serviceNowIntegrationServiceClient), activeCaseSvc),
-		)
+		activeCaseEscalationSvc = service.NewCaseEscalationService(service.NewServiceNowEscalationService(serviceNowIntegrationServiceClient), activeCaseSvc)
+	} else {
+		activeCaseEscalationSvc = service.NewUnavailableCaseEscalationService()
 	}
+	caseEscalationHandler := handler.NewCaseEscalationHandler(activeCaseEscalationSvc)
 
 	var changeRequestHandler *handler.ChangeRequestHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
@@ -247,6 +250,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		conversationHandler = handler.NewConversationHandler(service.NewServiceNowConversationService(serviceNowIntegrationServiceClient))
 	}
 
+	var outageHandler *handler.OutageHandler
+	if cfg.DataSource == config.DataSourceServiceNow {
+		outageHandler = handler.NewOutageHandler(service.NewServiceNowOutageService(serviceNowIntegrationServiceClient))
+	}
 	var globalHandler *handler.GlobalHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		globalHandler = handler.NewGlobalHandler(service.NewServiceNowGlobalService(serviceNowIntegrationServiceClient))
@@ -314,18 +321,22 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 
 	mux.HandleFunc("GET /health", handler.HealthCheck)
 
-	// event_publish_failures is not data-source specific, same rationale as
-	// the role catalogue and team registry below — registered unconditionally.
-	mux.HandleFunc("POST /event-publish-failures", eventPublishFailureHandler.CreateEventPublishFailure)
-	mux.HandleFunc("POST /event-publish-failures/search", eventPublishFailureHandler.SearchEventPublishFailures)
-	mux.HandleFunc("POST /event-publish-failures/{id}/resolve", eventPublishFailureHandler.ResolveEventPublishFailure)
-	mux.HandleFunc("POST /cases/{caseId}/sla-clocks", slaClockHandler.RegisterSLAClock)
-	mux.HandleFunc("GET /cases/{caseId}/sla-clocks/{clockType}", slaClockHandler.GetSLAClock)
-	mux.HandleFunc("PATCH /cases/{caseId}/sla-clocks/{clockType}/tiers/{tier}", slaClockHandler.SetSLAClockTierReached)
-	mux.HandleFunc("POST /scheduled-tasks/attempts", scheduledTaskRunHandler.AttemptScheduledTaskRun)
-	mux.HandleFunc("PATCH /scheduled-tasks/attempts/{id}", scheduledTaskRunHandler.UpdateScheduledTaskRunAttempt)
-	mux.HandleFunc("GET /scheduled-tasks/attempts", scheduledTaskRunHandler.ListScheduledTaskRuns)
-	mux.HandleFunc("DELETE /scheduled-tasks/attempts", scheduledTaskRunHandler.DeleteScheduledTaskRuns)
+	if eventPublishFailureHandler != nil {
+		mux.HandleFunc("POST /event-publish-failures", eventPublishFailureHandler.CreateEventPublishFailure)
+		mux.HandleFunc("POST /event-publish-failures/search", eventPublishFailureHandler.SearchEventPublishFailures)
+		mux.HandleFunc("POST /event-publish-failures/{id}/resolve", eventPublishFailureHandler.ResolveEventPublishFailure)
+	}
+	if slaClockHandler != nil {
+		mux.HandleFunc("POST /cases/{caseId}/sla-clocks", slaClockHandler.RegisterSLAClock)
+		mux.HandleFunc("GET /cases/{caseId}/sla-clocks/{clockType}", slaClockHandler.GetSLAClock)
+		mux.HandleFunc("PATCH /cases/{caseId}/sla-clocks/{clockType}/tiers/{tier}", slaClockHandler.SetSLAClockTierReached)
+	}
+	if scheduledTaskRunHandler != nil {
+		mux.HandleFunc("POST /scheduled-tasks/attempts", scheduledTaskRunHandler.AttemptScheduledTaskRun)
+		mux.HandleFunc("PATCH /scheduled-tasks/attempts/{id}", scheduledTaskRunHandler.UpdateScheduledTaskRunAttempt)
+		mux.HandleFunc("GET /scheduled-tasks/attempts", scheduledTaskRunHandler.ListScheduledTaskRuns)
+		mux.HandleFunc("DELETE /scheduled-tasks/attempts", scheduledTaskRunHandler.DeleteScheduledTaskRuns)
+	}
 
 	if snUserHandler != nil {
 		mux.HandleFunc("GET /users/{id}", snUserHandler.GetUser)
@@ -423,10 +434,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		mux.HandleFunc("POST /cases/{id}/github-issues", caseGithubIssueHandler.CreateCaseGithubIssue)
 	}
 
-	if caseEscalationHandler != nil {
-		mux.HandleFunc("GET /cases/{id}/escalations", caseEscalationHandler.SearchCaseEscalations)
-		mux.HandleFunc("POST /cases/{id}/escalations", caseEscalationHandler.CreateCaseEscalation)
-	}
+	// caseEscalationHandler is always non-nil (see its construction above);
+	// unavailableCaseEscalationService answers 503 when the data source
+	// doesn't support it.
+	mux.HandleFunc("GET /cases/{id}/escalations", caseEscalationHandler.SearchCaseEscalations)
+	mux.HandleFunc("POST /cases/{id}/escalations", caseEscalationHandler.CreateCaseEscalation)
 
 	if changeRequestHandler != nil {
 		mux.HandleFunc("POST /change-requests", changeRequestHandler.CreateChangeRequest)
@@ -499,6 +511,17 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, service.Even
 		mux.HandleFunc("POST /incidents/search", incidentHandler.SearchIncidents)
 		mux.HandleFunc("POST /incidents/aggregate", incidentHandler.AggregateIncidents)
 		mux.HandleFunc("POST /incidents/{id}/activities/search", incidentHandler.SearchIncidentActivities)
+		mux.HandleFunc("POST /incidents/{id}/specialist-handoffs", incidentHandler.HandOffIncidentToSpecialist)
+	}
+
+	if outageHandler != nil {
+		mux.HandleFunc("POST /outages", outageHandler.CreateOutage)
+		mux.HandleFunc("POST /outages/search", outageHandler.SearchOutages)
+		mux.HandleFunc("GET /outages/metadata", outageHandler.GetOutageMetadata)
+		mux.HandleFunc("GET /outages/{id}", outageHandler.GetOutage)
+		mux.HandleFunc("PATCH /outages/{id}", outageHandler.PatchOutage)
+		mux.HandleFunc("POST /outages/{id}/communications", outageHandler.AddOutageCommunication)
+		mux.HandleFunc("POST /outages/{id}/communications/search", outageHandler.SearchOutageCommunications)
 	}
 
 	if problemHandler != nil {
