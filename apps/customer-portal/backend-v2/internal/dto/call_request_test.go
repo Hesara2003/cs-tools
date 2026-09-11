@@ -171,4 +171,3 @@ func TestSearchCallRequestsResponse_UnmarshalNumericStateID(t *testing.T) {
 		t.Errorf("mapped State = %+v, want ID=\"2\", Label=\"Pending on WSO2\"", mapped.CallRequests[0].State)
 	}
 }
-
