@@ -87,6 +87,14 @@ const (
 	ErrMsgInvalidUUID  = "Invalid UUID format."
 	errMsgReadBody     = "Failed to read request body."
 
+	// Closed-case attachment guards (see caseIsClosed in cases.go). The wording
+	// matches the Ballerina backend's ERR_MSG_CASE_CLOSED_FOR_ATTACHMENT_*
+	// constants so both backends reject the same operation with the same
+	// message — the webapp surfaces it verbatim in its error toast.
+	ErrMsgCaseClosedForAttachmentCreate = "Cannot add attachments to a closed case."
+	ErrMsgCaseClosedForAttachmentUpdate = "Cannot update attachments on a closed case."
+	ErrMsgCaseClosedForAttachmentDelete = "Cannot delete attachments from a closed case."
+
 	// Closed-case feedback guard. Matches the Ballerina backend's
 	// ERR_MSG_CASE_NOT_CLOSED_FOR_FEEDBACK constant so both backends reject
 	// non-closed cases with the same message.
