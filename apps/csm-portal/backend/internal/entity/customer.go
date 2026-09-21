@@ -173,6 +173,23 @@ func (c *CustomerEntityClient) GetProjectMetadata(ctx context.Context, id string
 	return c.do(ctx, http.MethodGet, fmt.Sprintf("/projects/%s/metadata", url.PathEscape(id)), nil)
 }
 
+// GetProjectConsumption calls GET /projects/{id}/consumption on the entity
+// service, returning where a project has got to in product-consumption
+// provisioning.
+//
+// Read-only by design. The entity service exposes no write for this from here:
+// provisioning is driven by the customer portal, and the sequence it runs
+// creates real Choreo applications, so there is deliberately no way to start it
+// from the CSM side. Response is returned as raw JSON; typed response structs
+// are deferred.
+//
+// The response reports only whether credentials exist (hasConsumerSecret,
+// hasSecretKeys), never their values — see the entity service's
+// ProjectConsumptionView.
+func (c *CustomerEntityClient) GetProjectConsumption(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/projects/%s/consumption", url.PathEscape(id)), nil)
+}
+
 // SearchProjects calls POST /projects/search on the entity service.
 // Response is returned as raw JSON; field filtering to the portal shape is deferred.
 func (c *CustomerEntityClient) SearchProjects(ctx context.Context, body []byte) ([]byte, error) {

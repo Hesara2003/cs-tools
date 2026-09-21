@@ -249,6 +249,7 @@ func main() {
 	route("POST /accounts/{id}/contacts/search", handler.PermView, accountHandler.SearchAccountContacts)
 	route("GET /projects/{id}", handler.PermView, projectHandler.GetProject)
 	route("GET /projects/{id}/metadata", handler.PermView, projectHandler.GetProjectMetadata)
+	route("GET /projects/{id}/consumption", handler.PermView, projectHandler.GetProjectConsumption)
 	route("POST /projects/search", handler.PermView, projectHandler.SearchProjects)
 	route("POST /projects/{id}/contacts/search", handler.PermView, projectHandler.SearchProjectContacts)
 	route("GET /projects/{id}/contacts/{contactId}", handler.PermView, projectHandler.GetProjectContact)

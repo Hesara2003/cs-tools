@@ -556,3 +556,126 @@ func TestUpdateProject(t *testing.T) {
 		}
 	})
 }
+
+func TestGetProjectConsumption(t *testing.T) {
+	const projectID = "6fa0b42d-1bfa-4a69-a002-c9d3604bcb77"
+
+	t.Run("requires authenticated user", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := httptest.NewRequest(http.MethodGet, "/projects/"+projectID+"/consumption", nil)
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.GetProjectConsumption(w, r)
+		assertStatus(t, w, http.StatusUnauthorized)
+		assertErrorMessage(t, w, ErrMsgUnauthorized)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("rejects empty project ID", func(t *testing.T) {
+		h := NewProjectHandler(&mockEntityProjectClient{})
+		r := withUser(httptest.NewRequest(http.MethodGet, "/projects//consumption", nil))
+		w := httptest.NewRecorder()
+		h.GetProjectConsumption(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	// The entity service answers a non-UUID with a 400 of its own; rejecting it
+	// here keeps a malformed path from becoming an upstream round trip.
+	t.Run("rejects a non-UUID project ID", func(t *testing.T) {
+		called := false
+		client := &mockEntityProjectClient{
+			getProjectConsumptionFn: func(_ context.Context, _ string) ([]byte, error) {
+				called = true
+				return []byte(`{}`), nil
+			},
+		}
+		h := NewProjectHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/projects/not-a-uuid/consumption", nil))
+		r.SetPathValue("id", "not-a-uuid")
+		w := httptest.NewRecorder()
+		h.GetProjectConsumption(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		if called {
+			t.Error("a malformed project id must not reach the entity service")
+		}
+	})
+
+	t.Run("passes ID to upstream and returns 200 with response", func(t *testing.T) {
+		var capturedID string
+		client := &mockEntityProjectClient{
+			getProjectConsumptionFn: func(_ context.Context, id string) ([]byte, error) {
+				capturedID = id
+				return []byte(`{"projectId":"` + projectID + `","status":5,"applicationId":"app-1",` +
+					`"hasConsumerSecret":true,"hasSecretKeys":true}`), nil
+			},
+		}
+		h := NewProjectHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/projects/"+projectID+"/consumption", nil))
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.GetProjectConsumption(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if capturedID != projectID {
+			t.Errorf("upstream received id %q, want %q", capturedID, projectID)
+		}
+		resp := decodeJSON[map[string]any](t, w)
+		if resp["status"] != float64(5) {
+			t.Errorf("response status = %v, want 5", resp["status"])
+		}
+		if resp["hasSecretKeys"] != true {
+			t.Errorf("response hasSecretKeys = %v, want true", resp["hasSecretKeys"])
+		}
+	})
+
+	// The provisioning credentials must never reach this portal, so the
+	// response is passed through exactly as the entity service sends it — which
+	// reports presence, not values. This asserts the shape the CSM side relies
+	// on rather than trusting the upstream contract by eye.
+	t.Run("carries presence flags rather than credential values", func(t *testing.T) {
+		client := &mockEntityProjectClient{
+			getProjectConsumptionFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"projectId":"` + projectID + `","status":4,` +
+					`"consumerKey":"ck-1","hasConsumerSecret":true,"hasSecretKeys":false}`), nil
+			},
+		}
+		h := NewProjectHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodGet, "/projects/"+projectID+"/consumption", nil))
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.GetProjectConsumption(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		body := w.Body.String()
+		for _, secret := range []string{"consumerSecret", "primarySecretKey", "secondarySecretKey"} {
+			if strings.Contains(body, secret) {
+				t.Errorf("response exposes %s: %s", secret, body)
+			}
+		}
+	})
+
+	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
+		for _, tc := range upstreamErrorsGeneric("Failed to retrieve product consumption details.") {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				client := &mockEntityProjectClient{
+					getProjectConsumptionFn: func(_ context.Context, _ string) ([]byte, error) {
+						return nil, tc.err
+					},
+				}
+				h := NewProjectHandler(client)
+				r := withUser(httptest.NewRequest(http.MethodGet, "/projects/"+projectID+"/consumption", nil))
+				r.SetPathValue("id", projectID)
+				w := httptest.NewRecorder()
+				h.GetProjectConsumption(w, r)
+				assertStatus(t, w, tc.wantCode)
+				assertErrorMessage(t, w, tc.wantMsg)
+				assertContentType(t, w, "application/json")
+			})
+		}
+	})
+}

@@ -34,6 +34,7 @@ type entityProjectClient interface {
 	SearchProjectContacts(ctx context.Context, projectID string, body []byte) ([]byte, error)
 	GetProjectContact(ctx context.Context, projectID, contactID string) ([]byte, error)
 	UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error)
+	GetProjectConsumption(ctx context.Context, id string) ([]byte, error)
 }
 
 // ProjectHandler handles HTTP requests for project operations, delegating to the
@@ -89,6 +90,39 @@ func (h *ProjectHandler) GetProjectMetadata(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity GetProjectMetadata failed", "userID", user.UserID, "projectID", id, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to retrieve project metadata.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetProjectConsumption handles GET /projects/{id}/consumption.
+//
+// Reports where a project has got to in product-consumption provisioning: the
+// Choreo application created for it, and whether its OAuth2 credentials and
+// subscription secret keys have been generated. The entity service reports
+// those last two as presence booleans only, never as values.
+//
+// Read-only from this portal, deliberately. Provisioning is driven from the
+// customer portal, and the sequence it runs creates real Choreo applications
+// for customers — so there is no CSM-side route that can start it.
+func (h *ProjectHandler) GetProjectConsumption(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+
+	result, err := h.entity.GetProjectConsumption(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetProjectConsumption failed", "userID", user.UserID, "projectID", id, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to retrieve product consumption details.")
 		return
 	}
 
