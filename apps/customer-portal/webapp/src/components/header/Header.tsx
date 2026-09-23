@@ -17,13 +17,14 @@
 import { useEffect, type JSX, useMemo, useCallback } from "react";
 import { Box, Header as HeaderUI } from "@wso2/oxygen-ui";
 import { useIsStackedHeaderLayout } from "@hooks/useResponsiveLayout";
-import { useNavigate, useLocation, useParams } from "react-router";
+import { useNavigate, useLocation } from "react-router";
 import useInfiniteProjects, {
   flattenProjectPages,
   getTotalRecords,
 } from "@api/useGetProjects";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import { useLogger } from "@hooks/useLogger";
+import useNormalizedIdParam from "@hooks/useNormalizedIdParam";
 import Brand from "@components/header/Brand";
 import Actions from "@components/header/Actions";
 import SearchBar from "@components/header/SearchBar";
@@ -53,9 +54,17 @@ export default function Header({
   const navigate = useNavigate();
   const location = useLocation();
   const logger = useLogger();
-  const { projectId } = useParams<{
-    projectId?: string;
-  }>();
+  // The app shell renders above ProjectGuard, so it is not gated by the
+  // guard's loading state: on a URL carrying a dashless id (the bare 32-hex
+  // sysid, e.g. from a bookmarked link) it would fire project-scoped requests
+  // with an id the backend rejects as "Invalid UUID format." before the
+  // guard's repair navigation lands. useNormalizedIdParam returns the dashed
+  // form on the first render, so those requests go out correct.
+  //
+  // This is also the id handed to ProjectSwitcher and SearchBar, which both
+  // prefer the prop over their own route read -- normalising here is what
+  // makes their normalisation effective rather than shadowed.
+  const projectId = useNormalizedIdParam("projectId");
   const { isLoading: isAuthLoading } = useAsgardeo();
   const { isProjectSuspended } = useErrorPageContext();
   const isStackedHeader = useIsStackedHeaderLayout();
