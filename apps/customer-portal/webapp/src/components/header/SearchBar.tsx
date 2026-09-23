@@ -34,7 +34,8 @@ import {
   type JSX,
 } from "react";
 import { createPortal } from "react-dom";
-import { useLocation, useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate } from "react-router";
+import useNormalizedIdParam from "@hooks/useNormalizedIdParam";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import useGetProjectCases from "@api/useGetProjectCases";
 import useGetProjectFilters from "@api/useGetProjectFilters";
@@ -136,7 +137,13 @@ export default function SearchBar({
 }: SearchBarProps): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
-  const { projectId: urlProjectId } = useParams<{ projectId?: string }>();
+  // The app shell renders above ProjectGuard, so it is not gated by the
+  // guard's loading state: on a URL carrying a dashless id (the bare 32-hex
+  // sysid, e.g. from a bookmarked link) it would fire project-scoped requests
+  // with an id the backend rejects as "Invalid UUID format." before the
+  // guard's repair navigation lands. useNormalizedIdParam returns the dashed
+  // form on the first render, so those requests go out correct.
+  const urlProjectId = useNormalizedIdParam("projectId");
   const effectiveProjectId = projectId ?? urlProjectId ?? "";
 
   const [searchValue, setSearchValue] = useState("");

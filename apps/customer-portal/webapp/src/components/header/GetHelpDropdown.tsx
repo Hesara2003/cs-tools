@@ -34,7 +34,8 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate } from "react-router";
+import useNormalizedIdParam from "@hooks/useNormalizedIdParam";
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
 import useGetProjectDetails from "@api/useGetProjectDetails";
@@ -77,7 +78,13 @@ const GET_HELP_CONTAINER_SX = {
  */
 function GetHelpDropdownContent(): JSX.Element {
   const navigate = useNavigate();
-  const { projectId } = useParams<{ projectId?: string }>();
+  // The app shell renders above ProjectGuard, so it is not gated by the
+  // guard's loading state: on a URL carrying a dashless id (the bare 32-hex
+  // sysid, e.g. from a bookmarked link) it would fire project-scoped requests
+  // with an id the backend rejects as "Invalid UUID format." before the
+  // guard's repair navigation lands. useNormalizedIdParam returns the dashed
+  // form on the first render, so those requests go out correct.
+  const projectId = useNormalizedIdParam("projectId");
 
   const {
     data: projectsData,
@@ -314,7 +321,8 @@ function GetHelpDropdownContent(): JSX.Element {
  * @returns {JSX.Element} Get Help dropdown with optional divider.
  */
 export default function GetHelpDropdown(): JSX.Element {
-  const { projectId } = useParams<{ projectId?: string }>();
+  // Normalised for the same reason as above.
+  const projectId = useNormalizedIdParam("projectId");
   const {
     data: projectsData,
     isLoading: isProjectsLoading,

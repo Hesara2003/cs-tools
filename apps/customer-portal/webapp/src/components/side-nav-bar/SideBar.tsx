@@ -17,7 +17,8 @@
 import { Link, Sidebar } from "@wso2/oxygen-ui";
 import { Settings } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useMemo } from "react";
-import { useLocation, useParams, Link as NavigateLink } from "react-router";
+import { useLocation, Link as NavigateLink } from "react-router";
+import useNormalizedIdParam from "@hooks/useNormalizedIdParam";
 import useInfiniteProjects, { flattenProjectPages } from "@api/useGetProjects";
 import useGetProjectDetails from "@api/useGetProjectDetails";
 import useGetProjectFeatures from "@api/useGetProjectFeatures";
@@ -41,7 +42,13 @@ export default function SideBar({
   onToggleExpand,
 }: SideBarProps): JSX.Element {
   const location = useLocation();
-  const { projectId } = useParams<{ projectId?: string }>();
+  // The app shell renders above ProjectGuard, so it is not gated by the
+  // guard's loading state: on a URL carrying a dashless id (the bare 32-hex
+  // sysid, e.g. from a bookmarked link) it would fire project-scoped requests
+  // with an id the backend rejects as "Invalid UUID format." before the
+  // guard's repair navigation lands. useNormalizedIdParam returns the dashed
+  // form on the first render, so those requests go out correct.
+  const projectId = useNormalizedIdParam("projectId");
 
   // Get the active item from the location pathname.
   const pathSegments: string[] = location.pathname.split("/").filter(Boolean);

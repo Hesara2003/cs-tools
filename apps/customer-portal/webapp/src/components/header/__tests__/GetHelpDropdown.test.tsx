@@ -21,6 +21,9 @@ import GetHelpDropdown from "@components/header/GetHelpDropdown";
 vi.mock("react-router", () => ({
   useNavigate: () => vi.fn(),
   useParams: () => ({ projectId: "project-1" }),
+  // useNormalizedIdParam (via GetHelpDropdown) also reads useLocation to
+  // repair a dashless id; "project-1" is not one, so it never navigates.
+  useLocation: () => ({ pathname: "/projects/project-1", search: "", hash: "", state: null }),
 }));
 
 vi.mock("@api/useGetProjects", () => ({

@@ -124,13 +124,18 @@ let mockProjectFeatures = {
   acceptedSeverityValues: [] as any[],
 };
 
+const featuresCalledWith: Array<string | undefined> = [];
+
 vi.mock("@api/useGetProjectFeatures", () => ({
   __esModule: true,
-  default: () => ({
-    data: mockProjectFeatures,
-    isLoading: false,
-    isError: false,
-  }),
+  default: (projectId?: string) => {
+    featuresCalledWith.push(projectId);
+    return {
+      data: mockProjectFeatures,
+      isLoading: false,
+      isError: false,
+    };
+  },
 }));
 
 // Mock react-router
@@ -151,6 +156,9 @@ const createMockProjectsResponse = () => [
 vi.mock("react-router", () => ({
   useLocation: () => mockLocation,
   useParams: () => mockParams,
+  // useNormalizedIdParam (via SideBar) reads useNavigate to repair a dashless
+  // id in the URL; these tests always supply a dashed one, so it never fires.
+  useNavigate: () => vi.fn(),
   Link: ({ children, to }: { children: any; to: string }) => (
     <a href={to}>{children}</a>
   ),
@@ -364,5 +372,20 @@ describe("SideBar", () => {
       const sidebar = screen.getByTestId("sidebar");
       expect(sidebar).toHaveAttribute("data-active-item", "dashboard");
     });
+  });
+
+  // The app shell renders above ProjectGuard, so it is not gated by the
+  // guard's loading state. Before this was normalised here, a URL carrying the
+  // bare 32-hex sysid made the shell request project-scoped data with an id
+  // the backend rejects as "Invalid UUID format." -- the /features and
+  // /filters 400s seen on a bookmarked link.
+  it("requests project features with the dashed id when the URL carries a dashless one", () => {
+    mockParams.projectId = "6fa0b42d1bfaa694a002c9d3604bcb77";
+    featuresCalledWith.length = 0;
+
+    render(<SideBar collapsed={false} />);
+
+    expect(featuresCalledWith).toContain("6fa0b42d-1bfa-a694-a002-c9d3604bcb77");
+    expect(featuresCalledWith).not.toContain("6fa0b42d1bfaa694a002c9d3604bcb77");
   });
 });
