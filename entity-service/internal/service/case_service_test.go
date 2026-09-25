@@ -68,6 +68,9 @@ type stubCaseRepo struct {
 	updateCaseParent              func(ctx context.Context, caseID, parentID, callerEmail string) (time.Time, error)
 	updateCaseFields              func(ctx context.Context, req domain.UpdateCaseRequest, actorID, actorEmail string) (time.Time, error)
 	recordCaseFieldChangeActivity func(ctx context.Context, caseID, fieldName, oldValue, newValue, actorEmail string) error
+	removeCaseTag                 func(ctx context.Context, caseID, tagID, callerEmail string) error
+	setCaseTagSNSysID             func(ctx context.Context, caseID, tagID, snSysID string) error
+	getCaseTagSNSysID             func(ctx context.Context, caseID, tagID string) (*string, error)
 }
 
 func (s *stubCaseRepo) CreateCase(ctx context.Context, req domain.CreateCaseRequest) (domain.Case, error) {
@@ -154,8 +157,23 @@ func (s *stubCaseRepo) AddCaseTag(ctx context.Context, caseID, label, actorEmail
 	}
 	panic("not implemented")
 }
-func (s *stubCaseRepo) RemoveCaseTag(context.Context, string, string, string) error {
+func (s *stubCaseRepo) RemoveCaseTag(ctx context.Context, caseID, tagID, callerEmail string) error {
+	if s.removeCaseTag != nil {
+		return s.removeCaseTag(ctx, caseID, tagID, callerEmail)
+	}
 	panic("not implemented")
+}
+func (s *stubCaseRepo) SetCaseTagSNSysID(ctx context.Context, caseID, tagID, snSysID string) error {
+	if s.setCaseTagSNSysID != nil {
+		return s.setCaseTagSNSysID(ctx, caseID, tagID, snSysID)
+	}
+	return nil
+}
+func (s *stubCaseRepo) GetCaseTagSNSysID(ctx context.Context, caseID, tagID string) (*string, error) {
+	if s.getCaseTagSNSysID != nil {
+		return s.getCaseTagSNSysID(ctx, caseID, tagID)
+	}
+	return nil, nil
 }
 func (s *stubCaseRepo) SearchTags(context.Context, string, string, int) ([]domain.Tag, error) {
 	panic("not implemented")
@@ -1046,6 +1064,7 @@ type stubMirrorCaseService struct {
 	patchCaseFieldsFn       func(ctx context.Context, caseID string, state *domain.CaseState, severity *domain.CaseSeverity, workState *domain.CaseWorkState) (domain.UpdatedCase, error)
 	createBareCaseComment   func(ctx context.Context, caseID string, commentType domain.CommentType, content string) (domain.CaseCommentDetail, error)
 	addCaseTagAsFn          func(ctx context.Context, caseID, label, actorEmail string) (domain.Tag, error)
+	removeCaseTagFn         func(ctx context.Context, caseID, tagID string) error
 	patchCaseWatchListFn    func(ctx context.Context, caseID string, userIDs []string) (domain.UpdatedCase, error)
 	patchCaseAssigneeFn     func(ctx context.Context, caseID, assigneeEmail string) error
 	patchCaseAcknowledgeFn  func(ctx context.Context, caseID string) error
@@ -1083,6 +1102,10 @@ func (s *stubMirrorCaseService) patchCaseFieldsBundle(ctx context.Context, caseI
 
 func (s *stubMirrorCaseService) AddCaseTagAs(ctx context.Context, caseID, label, actorEmail string) (domain.Tag, error) {
 	return s.addCaseTagAsFn(ctx, caseID, label, actorEmail)
+}
+
+func (s *stubMirrorCaseService) RemoveCaseTag(ctx context.Context, caseID, tagID string) error {
+	return s.removeCaseTagFn(ctx, caseID, tagID)
 }
 
 func (s *stubMirrorCaseService) patchCaseWatchList(ctx context.Context, caseID string, userIDs []string) (domain.UpdatedCase, error) {
@@ -2528,6 +2551,150 @@ func TestCaseService_AddCaseTag_MirrorFailureRecordsWritebackFailure(t *testing.
 	}
 
 	waitFor(t, func() bool { return failures.count() == 1 })
+}
+
+// TestCaseService_AddCaseTag_MirrorSuccessPersistsSNSysID covers the
+// id-mapping half of the AddCaseTag mirror: on success, the ServiceNow
+// label_entry sys_id the mirror returns (converted to its raw form) is
+// persisted onto the (caseID, tagID) work_item_tag attachment via
+// SetCaseTagSNSysID.
+func TestCaseService_AddCaseTag_MirrorSuccessPersistsSNSysID(t *testing.T) {
+	mirror := &stubMirrorCaseService{
+		addCaseTagAsFn: func(context.Context, string, string, string) (domain.Tag, error) {
+			return domain.Tag{ID: testSNSysID2}, nil // the ServiceNow-side id, sysidToUUID-converted
+		},
+	}
+	type setCall struct{ caseID, tagID, snSysID string }
+	setCalls := make(chan setCall, 1)
+	repo := &stubCaseRepo{
+		addCaseTag: func(_ context.Context, caseID, label, actorEmail string) (domain.Tag, error) {
+			return domain.Tag{ID: "t-1", Label: label}, nil // the Postgres-side tag id
+		},
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{}, nil
+		},
+		setCaseTagSNSysID: func(_ context.Context, caseID, tagID, snSysID string) error {
+			setCalls <- setCall{caseID: caseID, tagID: tagID, snSysID: snSysID}
+			return nil
+		},
+	}
+	failures := &recordingSNWritebackFailures{}
+	dispatcher := NewSNWritebackDispatcher(failures)
+	userRepo := stubUserRepo{getUserByEmail: func(context.Context, string) (domain.User, error) {
+		return domain.User{ID: testDeploymentUUID, Email: "jane.doe@example.com"}, nil
+	}}
+	svc := NewCaseServiceWithSNWriteback(repo, userRepo, nil, alwaysUnrestrictedAccess{}, dispatcher, mirror)
+
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	if _, err := svc.AddCaseTag(ctx, testDeploymentUUID, "patch-me"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case got := <-setCalls:
+		if got.caseID != testDeploymentUUID {
+			t.Errorf("SetCaseTagSNSysID caseID = %q, want %q", got.caseID, testDeploymentUUID)
+		}
+		if got.tagID != "t-1" {
+			t.Errorf("SetCaseTagSNSysID tagID = %q, want %q (the Postgres tag id)", got.tagID, "t-1")
+		}
+		wantSysID := uuidToSysid(testSNSysID2)
+		if got.snSysID != wantSysID {
+			t.Errorf("SetCaseTagSNSysID snSysID = %q, want %q", got.snSysID, wantSysID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SetCaseTagSNSysID was never called")
+	}
+}
+
+// TestCaseService_RemoveCaseTag_MirrorsWithStoredSNSysID covers the REMOVE
+// mirror's happy path: when a ServiceNow label_entry sys_id is already
+// stored for this (caseID, tagID) attachment, the mirror fires against it
+// (converted back to UUID form for the mirror's own uuidToSysid).
+func TestCaseService_RemoveCaseTag_MirrorsWithStoredSNSysID(t *testing.T) {
+	storedSysID := uuidToSysid(testSNSysID2)
+	repo := &stubCaseRepo{
+		removeCaseTag: func(context.Context, string, string, string) error { return nil },
+		getCaseTagSNSysID: func(context.Context, string, string) (*string, error) {
+			return &storedSysID, nil
+		},
+	}
+	type removeCall struct{ caseID, tagID string }
+	called := make(chan removeCall, 1)
+	mirror := &stubMirrorCaseService{
+		removeCaseTagFn: func(_ context.Context, caseID, tagID string) error {
+			called <- removeCall{caseID: caseID, tagID: tagID}
+			return nil
+		},
+	}
+	failures := &recordingSNWritebackFailures{}
+	dispatcher := NewSNWritebackDispatcher(failures)
+	userRepo := stubUserRepo{getUserByEmail: func(context.Context, string) (domain.User, error) {
+		return domain.User{ID: testDeploymentUUID, Email: "jane.doe@example.com"}, nil
+	}}
+	svc := NewCaseServiceWithSNWriteback(repo, userRepo, nil, alwaysUnrestrictedAccess{}, dispatcher, mirror)
+
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	if err := svc.RemoveCaseTag(ctx, testDeploymentUUID, testUUID); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case got := <-called:
+		if got.caseID != testDeploymentUUID {
+			t.Errorf("mirror RemoveCaseTag caseID = %q, want %q", got.caseID, testDeploymentUUID)
+		}
+		if got.tagID != testSNSysID2 {
+			t.Errorf("mirror RemoveCaseTag tagID = %q, want %q (sysidToUUID of the stored sys_id)", got.tagID, testSNSysID2)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("mirror.RemoveCaseTag was never called")
+	}
+	if got := failures.count(); got != 0 {
+		t.Errorf("expected 0 sn_writeback_failures records for a successful mirror, got %d", got)
+	}
+}
+
+// TestCaseService_RemoveCaseTag_SkipsMirrorWhenNoSNSysIDStored covers the
+// pre-migration-attachment case: a NULL sn_sys_id (the AddCaseTag mirror
+// never ran, hasn't finished, or failed) must make the REMOVE mirror skip
+// silently -- no mirror call, no sn_writeback_failures record, no error to
+// the caller.
+func TestCaseService_RemoveCaseTag_SkipsMirrorWhenNoSNSysIDStored(t *testing.T) {
+	repo := &stubCaseRepo{
+		removeCaseTag: func(context.Context, string, string, string) error { return nil },
+		getCaseTagSNSysID: func(context.Context, string, string) (*string, error) {
+			return nil, nil // no mapping stored yet
+		},
+	}
+	mirrorCalled := make(chan struct{}, 1)
+	mirror := &stubMirrorCaseService{
+		removeCaseTagFn: func(context.Context, string, string) error {
+			mirrorCalled <- struct{}{}
+			return nil
+		},
+	}
+	failures := &recordingSNWritebackFailures{}
+	dispatcher := NewSNWritebackDispatcher(failures)
+	userRepo := stubUserRepo{getUserByEmail: func(context.Context, string) (domain.User, error) {
+		return domain.User{ID: testDeploymentUUID, Email: "jane.doe@example.com"}, nil
+	}}
+	svc := NewCaseServiceWithSNWriteback(repo, userRepo, nil, alwaysUnrestrictedAccess{}, dispatcher, mirror)
+
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	if err := svc.RemoveCaseTag(ctx, testDeploymentUUID, testUUID); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case <-mirrorCalled:
+		t.Fatal("mirror.RemoveCaseTag was called despite no ServiceNow mapping being stored")
+	case <-time.After(300 * time.Millisecond):
+		// expected: no mirror call
+	}
+	if got := failures.count(); got != 0 {
+		t.Errorf("expected 0 sn_writeback_failures records for a deliberate skip, got %d", got)
+	}
 }
 
 // TestCaseService_UpdateCase_WatchList_MirrorsToServiceNow covers the
