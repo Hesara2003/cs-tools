@@ -284,9 +284,10 @@ type CaseRepository interface {
 	// SetCaseTagSNSysID best-effort persists ServiceNow's own label_entry
 	// sys_id for the (caseID, tagID) attachment on work_item_tag (migration
 	// 000088) -- called from AddCaseTag's async ServiceNow mirror success
-	// path, never from the synchronous request path. A no-op (returns nil)
-	// if the pairing does not exist (e.g. it was removed concurrently before
-	// the mirror finished).
+	// path, never from the synchronous request path. Returns
+	// *apierror.NotFoundError if the pairing does not exist (e.g. it was
+	// removed concurrently before the mirror finished), so the caller can
+	// react by cleaning up the ServiceNow tag this call failed to map.
 	SetCaseTagSNSysID(ctx context.Context, caseID, tagID, snSysID string) error
 	// GetCaseTagSNSysID returns the ServiceNow label_entry sys_id previously
 	// stored for the (caseID, tagID) attachment by SetCaseTagSNSysID, or nil
@@ -2465,13 +2466,21 @@ func (r *caseRepo) RemoveCaseTag(ctx context.Context, caseID, tagID, _ string) e
 	return nil
 }
 
-// SetCaseTagSNSysID implements CaseRepository.
+// SetCaseTagSNSysID implements CaseRepository. Returns *apierror.NotFoundError
+// if the (caseID, tagID) attachment no longer exists -- e.g. RemoveCaseTag
+// deleted it concurrently, in the gap between AddCaseTag's mirror creating
+// the ServiceNow tag and this call persisting its sys_id back -- so the
+// AddCaseTag writeback callback can react by cleaning up the now-orphaned
+// ServiceNow tag instead of silently discarding its id.
 func (r *caseRepo) SetCaseTagSNSysID(ctx context.Context, caseID, tagID, snSysID string) error {
-	_, err := r.db.Exec(ctx,
+	result, err := r.db.Exec(ctx,
 		`UPDATE work_item_tag SET sn_sys_id = $1 WHERE work_item_id = $2 AND tag_id = $3`,
 		snSysID, caseID, tagID)
 	if err != nil {
 		return fmt.Errorf("set case tag sn sys id: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return &apierror.NotFoundError{Msg: "tag not found on this case"}
 	}
 	return nil
 }

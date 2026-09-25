@@ -398,13 +398,16 @@ func (s *timeCardService) DeleteTimeCard(ctx context.Context, req domain.DeleteT
 
 	// The SN sys_id must be read BEFORE the Postgres delete below: DeleteTimeCard
 	// removes the row entirely, taking time_card.sn_sys_id with it, so this is
-	// the last point at which it can be looked up. A lookup failure here is
-	// swallowed (not returned to the caller) -- Postgres deletion is
+	// the last point at which it can be looked up. Postgres deletion is
 	// authoritative and must proceed regardless of whether the row happens to
-	// have a ServiceNow mapping yet.
+	// have a ServiceNow mapping yet: a genuinely successful lookup that finds
+	// no mapping is skipped silently below, but a real lookup error is
+	// recorded as a failed writeback (sn_writeback_failures) instead of being
+	// discarded.
 	var snSysID *string
+	var snLookupErr error
 	if s.snWriteback != nil {
-		snSysID, _ = s.repo.GetTimeCardSNSysID(ctx, req.ID)
+		snSysID, snLookupErr = s.repo.GetTimeCardSNSysID(ctx, req.ID)
 	}
 
 	if err := s.repo.DeleteTimeCard(ctx, req.ID, userID); err != nil {
@@ -414,7 +417,15 @@ func (s *timeCardService) DeleteTimeCard(ctx context.Context, req domain.DeleteT
 	// Best-effort ServiceNow mirror write, DATA_SOURCE=postgres-servicenow-dual-write
 	// only. Postgres has already committed (the row is gone) by this point;
 	// skip silently (not an error) if no ServiceNow mapping was ever stored.
-	if s.snWriteback != nil && snSysID != nil && *snSysID != "" {
+	if s.snWriteback != nil && snLookupErr != nil {
+		lookupErr := snLookupErr
+		s.snWriteback.Dispatch(ctx, "time_card", req.ID, "delete",
+			map[string]any{"id": req.ID},
+			func(context.Context) error {
+				return lookupErr
+			},
+		)
+	} else if s.snWriteback != nil && snSysID != nil && *snSysID != "" {
 		mirrorReq := domain.DeleteTimeCardRequest{ID: sysidToUUID(*snSysID)}
 		s.snWriteback.Dispatch(ctx, "time_card", req.ID, "delete",
 			map[string]any{"id": req.ID},

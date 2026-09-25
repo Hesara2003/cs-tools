@@ -404,4 +404,58 @@ func TestTimeCardService_DeleteTimeCard_SkipsMirrorWhenNoSNSysIDStored(t *testin
 	}
 }
 
+// TestTimeCardService_DeleteTimeCard_RecordsSNWritebackFailureOnLookupError
+// covers the real-error half of the same lookup: unlike a genuinely
+// successful lookup that finds no mapping (nil, nil -- see
+// TestTimeCardService_DeleteTimeCard_SkipsMirrorWhenNoSNSysIDStored), a
+// lookup that fails outright must not be silently discarded. The Postgres
+// delete still succeeds and is still authoritative, but the lookup failure
+// is recorded to sn_writeback_failures for manual backfill instead of
+// vanishing.
+func TestTimeCardService_DeleteTimeCard_RecordsSNWritebackFailureOnLookupError(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	req := domain.DeleteTimeCardRequest{ID: testUUID}
+
+	lookupErr := errors.New("sn sys id lookup: connection reset")
+	repo := &stubTimeCardRepo{
+		deleteTimeCard: func(context.Context, string, string) error { return nil },
+		getTimeCardSNSysID: func(context.Context, string) (*string, error) {
+			return nil, lookupErr
+		},
+	}
+	mirrorCalled := make(chan struct{}, 1)
+	mirror := &stubMirrorTimeCardService{
+		deleteTimeCard: func(context.Context, domain.DeleteTimeCardRequest) (domain.DeleteTimeCardResponse, error) {
+			mirrorCalled <- struct{}{}
+			return domain.DeleteTimeCardResponse{}, nil
+		},
+	}
+	failures := &recordingSNWritebackFailures{}
+	dispatcher := NewSNWritebackDispatcher(failures)
+	svc := NewTimeCardServiceWithSNWriteback(repo, stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) { return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil },
+	}, dispatcher, mirror)
+
+	if _, err := svc.DeleteTimeCard(ctx, req); err != nil {
+		t.Fatalf("Postgres delete must still be reported as a success despite the lookup error, got: %v", err)
+	}
+
+	select {
+	case <-mirrorCalled:
+		t.Fatal("mirror.DeleteTimeCard was called despite the sys_id lookup having failed")
+	case <-time.After(300 * time.Millisecond):
+		// expected: no mirror call, the lookup error means we don't know
+		// what to delete
+	}
+
+	waitFor(t, func() bool { return failures.count() == 1 })
+	failReq := failures.calls[0]
+	if failReq.EntityType != "time_card" || failReq.EntityID != testUUID || failReq.Operation != "delete" {
+		t.Errorf("unexpected failure record: %+v", failReq)
+	}
+	if failReq.Error != lookupErr.Error() {
+		t.Errorf("failure record Error = %q, want %q", failReq.Error, lookupErr.Error())
+	}
+}
+
 func strPtrTC(s string) *string { return &s }

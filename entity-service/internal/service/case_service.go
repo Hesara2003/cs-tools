@@ -20,6 +20,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -2095,6 +2096,17 @@ func (s *caseService) addCaseTagAs(ctx context.Context, caseID, label, actorEmai
 				}
 				snSysID := uuidToSysid(snTag.ID)
 				if setErr := s.repo.SetCaseTagSNSysID(writeCtx, mirrorCaseID, mirrorTagID, snSysID); setErr != nil {
+					// If the (caseID, tagID) attachment no longer exists,
+					// RemoveCaseTag already ran in the gap between the
+					// mirror create above and this persist -- and, having
+					// found no sn_sys_id stored yet, skipped its own REMOVE
+					// mirror. The ServiceNow tag this callback just created
+					// would otherwise be permanently orphaned, so clean it
+					// up here instead.
+					var notFound *apierror.NotFoundError
+					if errors.As(setErr, &notFound) {
+						return s.snMirror.RemoveCaseTag(writeCtx, mirrorCaseID, snTag.ID)
+					}
 					slog.WarnContext(writeCtx, "sn writeback: case tag added in ServiceNow but persisting its sys_id back onto Postgres failed -- a REMOVE mirror for this attachment will keep skipping until this is fixed",
 						"caseId", mirrorCaseID, "tagId", mirrorTagID, "error", setErr)
 				}
@@ -2179,8 +2191,10 @@ func (s *caseService) detectPatchTagBillableOverride(ctx context.Context, caseID
 // by label alone. The sys_id lookup happens synchronously, BEFORE the
 // Postgres delete below: RemoveCaseTag deletes the work_item_tag row
 // entirely, taking sn_sys_id with it, so this is the last point it can be
-// read. A lookup failure here is swallowed -- Postgres deletion is
-// authoritative regardless of whether a ServiceNow mapping was ever stored.
+// read. Postgres deletion is authoritative regardless of whether a
+// ServiceNow mapping was ever stored: a genuinely successful lookup that
+// found no mapping is skipped silently, but a real lookup error is recorded
+// as a failed writeback (sn_writeback_failures) instead of being discarded.
 func (s *caseService) RemoveCaseTag(ctx context.Context, caseID, tagID string) error {
 	if err := validateUUIDs("caseId", []string{caseID}); err != nil {
 		return err
@@ -2194,8 +2208,9 @@ func (s *caseService) RemoveCaseTag(ctx context.Context, caseID, tagID string) e
 	}
 
 	var snSysID *string
+	var snLookupErr error
 	if s.snWriteback != nil {
-		snSysID, _ = s.repo.GetCaseTagSNSysID(ctx, caseID, tagID)
+		snSysID, snLookupErr = s.repo.GetCaseTagSNSysID(ctx, caseID, tagID)
 	}
 
 	if err := s.repo.RemoveCaseTag(ctx, caseID, tagID, actor.Email); err != nil {
@@ -2205,8 +2220,21 @@ func (s *caseService) RemoveCaseTag(ctx context.Context, caseID, tagID string) e
 	// Best-effort ServiceNow mirror write, DATA_SOURCE=postgres-servicenow-dual-write
 	// only. Postgres has already committed (the attachment is gone) by this
 	// point; skip silently (not an error) if no ServiceNow mapping was ever
-	// stored for it.
-	if s.snWriteback != nil && snSysID != nil && *snSysID != "" {
+	// stored for it (snLookupErr == nil, snSysID == nil -- a genuinely
+	// successful lookup that found no mapping). A real lookup error, though,
+	// is recorded as a failed writeback rather than silently discarded: it
+	// means we could not tell whether a ServiceNow mirror needs removing, so
+	// it lands in sn_writeback_failures for manual backfill instead of
+	// vanishing.
+	if s.snWriteback != nil && snLookupErr != nil {
+		lookupErr := snLookupErr
+		s.snWriteback.Dispatch(ctx, "case_tag", caseID, "remove",
+			map[string]any{"caseId": caseID, "tagId": tagID},
+			func(context.Context) error {
+				return lookupErr
+			},
+		)
+	} else if s.snWriteback != nil && snSysID != nil && *snSysID != "" {
 		mirrorCaseID, mirrorTagID := caseID, sysidToUUID(*snSysID)
 		s.snWriteback.Dispatch(ctx, "case_tag", caseID, "remove",
 			map[string]any{"caseId": mirrorCaseID, "tagId": tagID},

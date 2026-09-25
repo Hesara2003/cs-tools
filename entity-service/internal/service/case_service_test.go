@@ -2607,6 +2607,69 @@ func TestCaseService_AddCaseTag_MirrorSuccessPersistsSNSysID(t *testing.T) {
 	}
 }
 
+// TestCaseService_AddCaseTag_CleansUpSNTagWhenAttachmentRemovedConcurrently
+// covers the narrow race between AddCaseTag's mirror and a concurrent
+// RemoveCaseTag: if the (caseID, tagID) attachment is gone by the time
+// SetCaseTagSNSysID runs (RemoveCaseTag deleted it, found no sn_sys_id
+// stored yet, and so skipped its own REMOVE mirror), the ServiceNow tag this
+// callback just created would otherwise be permanently orphaned. The
+// callback must react to SetCaseTagSNSysID's *apierror.NotFoundError by
+// removing that just-created ServiceNow tag itself.
+func TestCaseService_AddCaseTag_CleansUpSNTagWhenAttachmentRemovedConcurrently(t *testing.T) {
+	mirror := &stubMirrorCaseService{
+		addCaseTagAsFn: func(context.Context, string, string, string) (domain.Tag, error) {
+			return domain.Tag{ID: testSNSysID2}, nil // the ServiceNow-side id, sysidToUUID-converted
+		},
+	}
+	removeCalled := make(chan struct{ caseID, tagID string }, 1)
+	mirror.removeCaseTagFn = func(_ context.Context, caseID, tagID string) error {
+		removeCalled <- struct{ caseID, tagID string }{caseID, tagID}
+		return nil
+	}
+	repo := &stubCaseRepo{
+		addCaseTag: func(_ context.Context, caseID, label, actorEmail string) (domain.Tag, error) {
+			return domain.Tag{ID: "t-1", Label: label}, nil
+		},
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{}, nil
+		},
+		setCaseTagSNSysID: func(context.Context, string, string, string) error {
+			// Simulates RemoveCaseTag having already deleted the
+			// work_item_tag row before this persist runs.
+			return &apierror.NotFoundError{Msg: "tag not found on this case"}
+		},
+	}
+	failures := &recordingSNWritebackFailures{}
+	dispatcher := NewSNWritebackDispatcher(failures)
+	userRepo := stubUserRepo{getUserByEmail: func(context.Context, string) (domain.User, error) {
+		return domain.User{ID: testDeploymentUUID, Email: "jane.doe@example.com"}, nil
+	}}
+	svc := NewCaseServiceWithSNWriteback(repo, userRepo, nil, alwaysUnrestrictedAccess{}, dispatcher, mirror)
+
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	if _, err := svc.AddCaseTag(ctx, testDeploymentUUID, "patch-me"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case got := <-removeCalled:
+		if got.caseID != testDeploymentUUID {
+			t.Errorf("cleanup RemoveCaseTag caseID = %q, want %q", got.caseID, testDeploymentUUID)
+		}
+		if got.tagID != testSNSysID2 {
+			t.Errorf("cleanup RemoveCaseTag tagID = %q, want %q (the just-created ServiceNow tag id)", got.tagID, testSNSysID2)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("mirror.RemoveCaseTag (cleanup) was never called")
+	}
+	// A handled NotFoundError is not itself a mirror failure to record --
+	// only if the cleanup RemoveCaseTag call above also failed would this
+	// count.
+	if got := failures.count(); got != 0 {
+		t.Errorf("expected 0 sn_writeback_failures records for a successfully cleaned-up race, got %d", got)
+	}
+}
+
 // TestCaseService_RemoveCaseTag_MirrorsWithStoredSNSysID covers the REMOVE
 // mirror's happy path: when a ServiceNow label_entry sys_id is already
 // stored for this (caseID, tagID) attachment, the mirror fires against it
@@ -2694,6 +2757,58 @@ func TestCaseService_RemoveCaseTag_SkipsMirrorWhenNoSNSysIDStored(t *testing.T) 
 	}
 	if got := failures.count(); got != 0 {
 		t.Errorf("expected 0 sn_writeback_failures records for a deliberate skip, got %d", got)
+	}
+}
+
+// TestCaseService_RemoveCaseTag_RecordsSNWritebackFailureOnLookupError covers
+// the real-error half of the same lookup: unlike a genuinely successful
+// lookup that finds no mapping (nil, nil -- see
+// TestCaseService_RemoveCaseTag_SkipsMirrorWhenNoSNSysIDStored), a lookup
+// that fails outright must not be silently discarded. The Postgres delete
+// still succeeds and is still authoritative, but the lookup failure is
+// recorded to sn_writeback_failures for manual backfill instead of vanishing.
+func TestCaseService_RemoveCaseTag_RecordsSNWritebackFailureOnLookupError(t *testing.T) {
+	lookupErr := errors.New("sn sys id lookup: connection reset")
+	repo := &stubCaseRepo{
+		removeCaseTag: func(context.Context, string, string, string) error { return nil },
+		getCaseTagSNSysID: func(context.Context, string, string) (*string, error) {
+			return nil, lookupErr
+		},
+	}
+	mirrorCalled := make(chan struct{}, 1)
+	mirror := &stubMirrorCaseService{
+		removeCaseTagFn: func(context.Context, string, string) error {
+			mirrorCalled <- struct{}{}
+			return nil
+		},
+	}
+	failures := &recordingSNWritebackFailures{}
+	dispatcher := NewSNWritebackDispatcher(failures)
+	userRepo := stubUserRepo{getUserByEmail: func(context.Context, string) (domain.User, error) {
+		return domain.User{ID: testDeploymentUUID, Email: "jane.doe@example.com"}, nil
+	}}
+	svc := NewCaseServiceWithSNWriteback(repo, userRepo, nil, alwaysUnrestrictedAccess{}, dispatcher, mirror)
+
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	if err := svc.RemoveCaseTag(ctx, testDeploymentUUID, testUUID); err != nil {
+		t.Fatalf("Postgres delete must still be reported as a success despite the lookup error, got: %v", err)
+	}
+
+	select {
+	case <-mirrorCalled:
+		t.Fatal("mirror.RemoveCaseTag was called despite the sys_id lookup having failed")
+	case <-time.After(300 * time.Millisecond):
+		// expected: no mirror call, the lookup error means we don't know
+		// what to remove
+	}
+
+	waitFor(t, func() bool { return failures.count() == 1 })
+	req := failures.calls[0]
+	if req.EntityType != "case_tag" || req.EntityID != testDeploymentUUID || req.Operation != "remove" {
+		t.Errorf("unexpected failure record: %+v", req)
+	}
+	if req.Error != lookupErr.Error() {
+		t.Errorf("failure record Error = %q, want %q", req.Error, lookupErr.Error())
 	}
 }
 
