@@ -55,6 +55,8 @@ export default function CaseDetailsActivityPanel({
   caseId,
   conversationId,
   caseStatus,
+  closedOn,
+  closedBy,
 }: CaseDetailsActivityPanelProps): JSX.Element {
   const theme = useTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -129,6 +131,27 @@ export default function CaseDetailsActivityPanel({
     [mergedTimeline],
   );
 
+  const isCaseClosed = caseStatus?.toLowerCase() === "closed";
+  const closedByLabel = closedBy?.label ?? closedBy?.name ?? "System";
+
+  // Case closure isn't a comment — surface it as a synthetic last activity
+  // entry, rendered through the same CommentBubble as every other entry so
+  // it matches their avatar/name/date/card styling exactly.
+  const timelineItemsToShow = useMemo(() => {
+    if (!isCaseClosed || !closedOn) return commentsToShow;
+    const closedEntry: CaseComment = {
+      id: "case-closed",
+      content: `Case closed by ${closedByLabel}`,
+      type: "comments",
+      isEscalated: false,
+      createdOn: closedOn,
+      createdBy: closedByLabel,
+    };
+    return [closedEntry, ...commentsToShow].sort(
+      (a, b) => -compareByCreatedOnThenId(a, b),
+    );
+  }, [commentsToShow, isCaseClosed, closedOn, closedByLabel]);
+
   const primaryLight = theme.palette.primary?.light ?? "#fa7b3f";
   const primaryBg = alpha(primaryLight, 0.1);
 
@@ -175,7 +198,7 @@ export default function CaseDetailsActivityPanel({
   } else {
     commentsContent = (
       <ActivityContentWithImageModal
-        commentsToShow={commentsToShow}
+        commentsToShow={timelineItemsToShow}
         caseCreatedOn={undefined}
         currentUserEmail={currentUserEmail}
         primaryBg={primaryBg}
