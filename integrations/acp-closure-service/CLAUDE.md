@@ -499,6 +499,20 @@ plain authenticated HTTP call.
   notice) all populated internal recipients go in `to`. This is a design
   decision made in this codebase, not something Rashmika's API dictates —
   reconsider if it turns out wrong in practice.
+- **`StandingCC` (`STANDING_CC_RECIPIENTS`) cc's a fixed address list on
+  every notice**, uniformly — internal, customer-facing, and the
+  no-business-contact nudge alike, subscription and invoice cascades alike,
+  added in `Send` right after `recipientsToToCC` and before filtering. This
+  was a real gap in the initial port, caught late: every real legacy
+  reference email this project has (both internal and customer-facing) cc's
+  `customer-lifecycle-notification@wso2.com` and `billing@wso2.com`, and
+  this component never sent to either until this field existed. Deliberately
+  env-configurable rather than a hardcoded constant like `wso2LogoURL` —
+  these are real production distribution lists, and staging/dev must leave
+  this empty for the same reason `EMAIL_SERVICE_ALLOW_NON_WSO2_RECIPIENTS`
+  defaults false: real people/teams must not receive test traffic. Entries
+  still pass through `filterRecipients` like any other recipient — this is
+  additive cc, not a bypass of the WSO2-only staging safeguard.
 - **The WSO2-only staging safeguard is a hard requirement from Rashmika's
   team**, not a suggestion: "make sure emails aren't being sent in staging
   environment for any non-wso2 emails." `EMAIL_SERVICE_ALLOW_NON_WSO2_RECIPIENTS`

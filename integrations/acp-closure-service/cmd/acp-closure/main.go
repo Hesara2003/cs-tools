@@ -59,6 +59,7 @@ func main() {
 	isEmailSendEnabled := envBool("IS_EMAIL_SEND_ENABLED", false)
 	testProjectID := os.Getenv("TEST_PROJECT_ID")
 	excludedProjectIDs := parseExcludedProjectIDs(os.Getenv("EXCLUDED_PROJECT_IDS"))
+	standingCC := parseCommaSeparatedList(os.Getenv("STANDING_CC_RECIPIENTS"))
 	runID := newRunID()
 
 	slog.Info("acp-closure-service starting",
@@ -67,6 +68,7 @@ func main() {
 		"isEmailSendEnabled", isEmailSendEnabled,
 		"testProjectID", testProjectID,
 		"excludedProjectIDs", sortedKeys(excludedProjectIDs),
+		"standingCC", standingCC,
 	)
 
 	entityClient := entity.NewClient(entity.Config{
@@ -99,6 +101,7 @@ func main() {
 			Sender:                 emailClient,
 			Logger:                 slog.Default(),
 			AllowNonWSO2Recipients: envBool("EMAIL_SERVICE_ALLOW_NON_WSO2_RECIPIENTS", false),
+			StandingCC:             standingCC,
 		}
 	}
 
@@ -182,6 +185,26 @@ func parseExcludedProjectIDs(v string) map[string]bool {
 		ids[id] = true
 	}
 	return ids
+}
+
+// parseCommaSeparatedList parses STANDING_CC_RECIPIENTS: a comma-separated
+// list of email addresses always cc'd on every notice (see
+// notify.EmailNotifier.StandingCC's own doc comment for why this is
+// deliberately env-configurable rather than a hardcoded constant — staging
+// must not cc real production distribution lists). Same
+// trim-and-drop-empty convention as parseExcludedProjectIDs, but returns an
+// ordered slice rather than a set, since order and duplicates are
+// meaningful for a recipient list.
+func parseCommaSeparatedList(v string) []string {
+	var out []string
+	for raw := range strings.SplitSeq(v, ",") {
+		s := strings.TrimSpace(raw)
+		if s == "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // sortedKeys returns m's keys in sorted order, for stable, readable log
