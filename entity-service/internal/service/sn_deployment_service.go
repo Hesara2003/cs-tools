@@ -251,6 +251,17 @@ func (s *snDeploymentService) createDeploymentSNFirstDetails(ctx context.Context
 	if err != nil {
 		return "", "", "", time.Time{}, fmt.Errorf("sn create deployment: parse createdOn %q: %w", snResp.Deployment.CreatedOn, err)
 	}
+	// deployment.number is NOT NULL UNIQUE on the Postgres side (see
+	// createDeploymentSNFirst's own doc comment) -- an empty id/number here
+	// would either fail the Postgres insert with an opaque constraint
+	// violation or, worse, succeed with a blank number that later collides
+	// with a real one. Caught here, before it ever reaches the repository.
+	if snResp.Deployment.ID == "" {
+		return "", "", "", time.Time{}, &apierror.ValidationError{Msg: "sn create deployment: response id is required"}
+	}
+	if snResp.Deployment.Number == "" {
+		return "", "", "", time.Time{}, &apierror.ValidationError{Msg: "sn create deployment: response number is required"}
+	}
 	return sysidToUUID(snResp.Deployment.ID), snResp.Deployment.Number, snResp.Deployment.CreatedBy, createdOn, nil
 }
 
@@ -275,24 +286,8 @@ type snUpdateDeploymentResponse struct {
 
 // UpdateDeployment implements DeploymentService for the ServiceNow data source.
 func (s *snDeploymentService) UpdateDeployment(ctx context.Context, req domain.UpdateDeploymentRequest) (domain.UpdateDeploymentResponse, error) {
-	if err := validateUUIDs("id", []string{req.ID}); err != nil {
+	if err := validateUpdateDeploymentRequest(req); err != nil {
 		return domain.UpdateDeploymentResponse{}, err
-	}
-
-	hasDetailFields := req.Name != nil || req.Type != nil || req.Description != nil
-	if !hasDetailFields && req.Active == nil {
-		return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: "at least one of name, type, description, or active must be provided"}
-	}
-	if hasDetailFields && req.Active != nil {
-		return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: "active must not be provided when updating deployment details"}
-	}
-	if req.Type != nil {
-		if _, ok := validDeploymentTypes[*req.Type]; !ok {
-			return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid type %q", *req.Type)}
-		}
-	}
-	if req.Active != nil && *req.Active {
-		return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: "active can only be set to false"}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)

@@ -20,6 +20,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -113,9 +114,14 @@ func (s *deploymentService) createDeploymentSNFirst(ctx context.Context, req dom
 
 	created, err := s.repo.CreateDeploymentFromServiceNow(ctx, req, id, number, createdBy, createdOn)
 	if err != nil {
-		// ServiceNow already has the deployment at this point — logged
-		// loudly since nothing else records it, same as
-		// createCaseSNFirst's equivalent Postgres-insert-failure path.
+		// ServiceNow already has the deployment at this point — this is now
+		// real drift (ServiceNow has it, Postgres doesn't) needing operator
+		// attention, not a safely-rejected request. Logged loudly rather
+		// than only returned, since nothing else records this particular
+		// failure shape -- same as createCaseSNFirst's equivalent
+		// Postgres-insert-failure path.
+		slog.ErrorContext(ctx, "sn create deployment: ServiceNow deployment created but the Postgres insert failed",
+			"deploymentId", id, "number", number, "projectId", req.ProjectID, "error", err)
 		return domain.CreateDeploymentResponse{}, err
 	}
 
@@ -147,6 +153,10 @@ func (s *deploymentService) UpdateDeployment(ctx context.Context, req domain.Upd
 		return domain.UpdateDeploymentResponse{}, &apierror.ValidationError{Msg: "UpdateDeployment is not supported for the PostgreSQL data source"}
 	}
 
+	if err := validateUpdateDeploymentRequest(req); err != nil {
+		return domain.UpdateDeploymentResponse{}, err
+	}
+
 	actor, err := s.resolveActorEmail(ctx)
 	if err != nil {
 		return domain.UpdateDeploymentResponse{}, err
@@ -170,6 +180,38 @@ func (s *deploymentService) UpdateDeployment(ctx context.Context, req domain.Upd
 		Message:    "Deployment updated successfully.",
 		Deployment: updated,
 	}, nil
+}
+
+// validateUpdateDeploymentRequest holds the validation rules for
+// UpdateDeployment shared by both implementations -- originally only
+// snDeploymentService.UpdateDeployment enforced these (UUID shape, exactly
+// one of the detail fields or active, a known type, active can only be set
+// to false); deploymentService.UpdateDeployment (the
+// DATA_SOURCE=postgres-servicenow-dual-write path) skipped all of it and
+// wrote straight to Postgres. Extracted here so both call the same checks
+// rather than the dual-write path silently accepting a request ServiceNow
+// mode would reject.
+func validateUpdateDeploymentRequest(req domain.UpdateDeploymentRequest) error {
+	if err := validateUUIDs("id", []string{req.ID}); err != nil {
+		return err
+	}
+
+	hasDetailFields := req.Name != nil || req.Type != nil || req.Description != nil
+	if !hasDetailFields && req.Active == nil {
+		return &apierror.ValidationError{Msg: "at least one of name, type, description, or active must be provided"}
+	}
+	if hasDetailFields && req.Active != nil {
+		return &apierror.ValidationError{Msg: "active must not be provided when updating deployment details"}
+	}
+	if req.Type != nil {
+		if _, ok := validDeploymentTypes[*req.Type]; !ok {
+			return &apierror.ValidationError{Msg: fmt.Sprintf("invalid type %q", *req.Type)}
+		}
+	}
+	if req.Active != nil && *req.Active {
+		return &apierror.ValidationError{Msg: "active can only be set to false"}
+	}
+	return nil
 }
 
 // resolveActorEmail resolves the caller's email from x-user-id-token, for
