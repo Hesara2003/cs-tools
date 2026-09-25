@@ -162,27 +162,36 @@ type snCreateDeploymentResponse struct {
 	Message    string `json:"message"`
 	Deployment struct {
 		ID        string `json:"id"`
+		Number    string `json:"number"`
 		CreatedOn string `json:"createdOn"`
 		CreatedBy string `json:"createdBy"`
 	} `json:"deployment"`
 }
 
-// CreateDeployment implements DeploymentService for the ServiceNow data source.
-func (s *snDeploymentService) CreateDeployment(ctx context.Context, req domain.CreateDeploymentRequest) (domain.CreateDeploymentResponse, error) {
+// createDeploymentSN validates req and performs the actual ServiceNow
+// POST /deployments call, parsing its response. Shared by CreateDeployment
+// (below, the public ServiceNow-data-source path, which only exposes
+// id/createdOn/createdBy on the wire — domain.CreatedDeployment has no
+// Number field, matching backend-v2's own mirror struct) and
+// deploymentService.createDeploymentSNFirst (dual-write's Postgres insert,
+// which needs Number too: deployment.number is NOT NULL UNIQUE and Postgres
+// has no generator for it, so ServiceNow's own assigned number is the only
+// source, the same problem CreateCaseFromServiceNow solves for case.number).
+func (s *snDeploymentService) createDeploymentSN(ctx context.Context, req domain.CreateDeploymentRequest) (snCreateDeploymentResponse, error) {
 	if err := validateUUIDs("projectId", []string{req.ProjectID}); err != nil {
-		return domain.CreateDeploymentResponse{}, err
+		return snCreateDeploymentResponse{}, err
 	}
 	if req.Name == "" {
-		return domain.CreateDeploymentResponse{}, &apierror.ValidationError{Msg: "name is required"}
+		return snCreateDeploymentResponse{}, &apierror.ValidationError{Msg: "name is required"}
 	}
 	if req.Type == nil {
-		return domain.CreateDeploymentResponse{}, &apierror.ValidationError{Msg: "type is required"}
+		return snCreateDeploymentResponse{}, &apierror.ValidationError{Msg: "type is required"}
 	}
 	if _, ok := validDeploymentTypes[*req.Type]; !ok {
-		return domain.CreateDeploymentResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid type %q", *req.Type)}
+		return snCreateDeploymentResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid type %q", *req.Type)}
 	}
 	if req.Description == "" {
-		return domain.CreateDeploymentResponse{}, &apierror.ValidationError{Msg: "description is required"}
+		return snCreateDeploymentResponse{}, &apierror.ValidationError{Msg: "description is required"}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)
@@ -196,12 +205,21 @@ func (s *snDeploymentService) CreateDeployment(ctx context.Context, req domain.C
 
 	raw, err := s.client.Post(ctx, "/deployments", token, payload)
 	if err != nil {
-		return domain.CreateDeploymentResponse{}, err
+		return snCreateDeploymentResponse{}, err
 	}
 
 	var snResp snCreateDeploymentResponse
 	if err := json.Unmarshal(raw, &snResp); err != nil {
-		return domain.CreateDeploymentResponse{}, fmt.Errorf("sn create deployment: parse response: %w", err)
+		return snCreateDeploymentResponse{}, fmt.Errorf("sn create deployment: parse response: %w", err)
+	}
+	return snResp, nil
+}
+
+// CreateDeployment implements DeploymentService for the ServiceNow data source.
+func (s *snDeploymentService) CreateDeployment(ctx context.Context, req domain.CreateDeploymentRequest) (domain.CreateDeploymentResponse, error) {
+	snResp, err := s.createDeploymentSN(ctx, req)
+	if err != nil {
+		return domain.CreateDeploymentResponse{}, err
 	}
 
 	createdOn, err := time.Parse(snCreatedOnLayout, snResp.Deployment.CreatedOn)
@@ -217,6 +235,23 @@ func (s *snDeploymentService) CreateDeployment(ctx context.Context, req domain.C
 			CreatedBy: snResp.Deployment.CreatedBy,
 		},
 	}, nil
+}
+
+// createDeploymentSNFirstDetails implements deploymentSNCreator (see
+// deployment_service.go) -- the dual-write CREATE path's entry point into
+// this service, returning the fields Postgres's own insert needs (including
+// Number, which the public CreateDeployment above does not expose) rather
+// than the wire-shaped domain.CreateDeploymentResponse.
+func (s *snDeploymentService) createDeploymentSNFirstDetails(ctx context.Context, req domain.CreateDeploymentRequest) (id, number, createdBy string, createdOn time.Time, err error) {
+	snResp, err := s.createDeploymentSN(ctx, req)
+	if err != nil {
+		return "", "", "", time.Time{}, err
+	}
+	createdOn, err = time.Parse(snCreatedOnLayout, snResp.Deployment.CreatedOn)
+	if err != nil {
+		return "", "", "", time.Time{}, fmt.Errorf("sn create deployment: parse createdOn %q: %w", snResp.Deployment.CreatedOn, err)
+	}
+	return sysidToUUID(snResp.Deployment.ID), snResp.Deployment.Number, snResp.Deployment.CreatedBy, createdOn, nil
 }
 
 // snUpdateDeploymentPayload is the Choreo PATCH /deployments/{id} request body.
