@@ -132,19 +132,23 @@ export default function CaseDetailsActivityPanel({
   );
 
   const isCaseClosed = caseStatus?.toLowerCase() === "closed";
-  const closedByLabel = closedBy?.label ?? closedBy?.name ?? "System";
+  // Never invent an actor — if the API didn't return who closed the case,
+  // say so plainly instead of implying an automated/system closure.
+  const closedByLabel = closedBy?.label ?? closedBy?.name ?? "Not available";
 
   // Case closure isn't a comment — surface it as a synthetic last activity
   // entry, rendered through the same CommentBubble as every other entry so
-  // it matches their avatar/name/date/card styling exactly.
+  // it matches their avatar/name/date/card styling exactly. Shown whenever
+  // the case is closed, even if closedOn/closedBy is missing, so the gap is
+  // visible rather than silently dropped.
   const timelineItemsToShow = useMemo(() => {
-    if (!isCaseClosed || !closedOn) return commentsToShow;
+    if (!isCaseClosed) return commentsToShow;
     const closedEntry: CaseComment = {
       id: "case-closed",
       content: `Case closed by ${closedByLabel}`,
       type: "comments",
       isEscalated: false,
-      createdOn: closedOn,
+      createdOn: closedOn ?? null,
       createdBy: closedByLabel,
     };
     return [closedEntry, ...commentsToShow].sort(
