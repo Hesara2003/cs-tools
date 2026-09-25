@@ -527,9 +527,18 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 
 	deploymentRepo := repository.NewDeploymentRepository(db)
 	var activeDeploymentSvc service.DeploymentService
-	if cfg.DataSource == config.DataSourceServiceNow {
+	switch cfg.DataSource {
+	case config.DataSourceServiceNow:
 		activeDeploymentSvc = service.NewServiceNowDeploymentService(serviceNowIntegrationServiceClient)
-	} else {
+	case config.DataSourcePostgresServiceNowDualWrite:
+		// CreateDeployment is ServiceNow-first and synchronous; UpdateDeployment
+		// is Postgres-first with an asynchronous ServiceNow mirror -- see
+		// deploymentService.createDeploymentSNFirst/UpdateDeployment's own doc
+		// comments for the full reasoning (the same CREATE-vs-UPDATE asymmetry
+		// as caseService).
+		snDeploymentMirrorSvc := service.NewServiceNowDeploymentService(serviceNowIntegrationServiceClient)
+		activeDeploymentSvc = service.NewDeploymentServiceWithSNWriteback(deploymentRepo, snWritebackDispatcher, snDeploymentMirrorSvc)
+	default:
 		activeDeploymentSvc = service.NewDeploymentService(deploymentRepo)
 	}
 	deploymentHandler := handler.NewDeploymentHandler(activeDeploymentSvc)

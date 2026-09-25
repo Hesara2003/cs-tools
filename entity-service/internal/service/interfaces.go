@@ -596,12 +596,17 @@ type DeploymentService interface {
 	// project IDs, deployment type keys, and name search query. A ValidationError is
 	// returned for invalid input; any other error indicates an infrastructure failure.
 	SearchDeployments(ctx context.Context, req domain.SearchDeploymentsRequest) (domain.SearchDeploymentsResponse, error)
-	// CreateDeployment creates a new deployment in ServiceNow.
-	// Supported by the ServiceNow data source only.
+	// CreateDeployment creates a new deployment. Supported by the ServiceNow
+	// data source, and by DATA_SOURCE=postgres-servicenow-dual-write (SN-first,
+	// synchronous — see deploymentService.createDeploymentSNFirst). Not
+	// supported by plain DATA_SOURCE=postgres.
 	CreateDeployment(ctx context.Context, req domain.CreateDeploymentRequest) (domain.CreateDeploymentResponse, error)
-	// UpdateDeployment updates a deployment's name, type, description, or deactivates it.
-	// Either detail fields or Active=false must be provided, but not both.
-	// Supported by the ServiceNow data source only.
+	// UpdateDeployment updates a deployment's name, type, description, or
+	// deactivates it. Either detail fields or Active=false must be provided,
+	// but not both. Supported by the ServiceNow data source, and by
+	// DATA_SOURCE=postgres-servicenow-dual-write (Postgres-first, ServiceNow
+	// mirrored asynchronously afterward). Not supported by plain
+	// DATA_SOURCE=postgres.
 	UpdateDeployment(ctx context.Context, req domain.UpdateDeploymentRequest) (domain.UpdateDeploymentResponse, error)
 }
 
