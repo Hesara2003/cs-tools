@@ -1303,17 +1303,35 @@ export interface BeComment {
   id: string;
   /** Parent reference id — the case id or conversation id per the endpoint. */
   referenceId?: string;
-  /** Rich-text HTML (case comment) or Markdown (Novera chat) body. */
+  /** Rich-text HTML (case comment) or Markdown (Novera chat) body. Once
+   * `isDeleted` is true, this is the literal string `"[deleted]"` for a
+   * non-admin internal caller, or the real (never-destroyed) content for an
+   * admin — the frontend renders whatever is given here, no client-side
+   * redaction. */
   content: string;
   /** Normalized comment type; `string` (not the enum) to tolerate new values. */
   type: string;
   createdOn: string;
   createdBy: BeUserReference | null;
+  /** ISO timestamp of the comment's most recent edit. Present once a comment
+   * has been edited at least once via `PATCH /comments/{id}`; absent on a
+   * never-edited comment. */
+  lastEditedOn?: string;
+  /** True once the comment has been soft-deleted via `DELETE /comments/{id}`.
+   * A customer-role caller never receives a soft-deleted row at all, so this
+   * only ever appears for an internal caller. `omitempty` on the wire — absent
+   * or false on a never-deleted comment. */
+  isDeleted?: boolean;
 }
 
 export interface BeCommentSearchResponse extends BeSearchResponseBase {
   /** Optional: the backend may omit the array on an empty result. */
   comments?: BeComment[];
+}
+
+/** Body of `PATCH /comments/{id}`. */
+export interface BeCommentPatchPayload {
+  content: string;
 }
 
 // ---------------------------------------------------------------------------

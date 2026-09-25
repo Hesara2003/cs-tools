@@ -48,6 +48,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useLocation } from "react-router";
+import { ApiQueryKeys } from "@constants/apiConstants";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
@@ -71,7 +72,9 @@ import { beStateFromUi, priorityFromSeverity } from "@api/backend/mappers";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import { BackendApiError } from "@api/backend/client";
 import {
+  useDeleteComment,
   useGetCsmCaseComments,
+  usePatchComment,
   usePostCsmCaseComment,
 } from "@features/csm-cases/api/useCsmCaseComments";
 import { useGetCsmConversationMessages } from "@features/csm-cases/api/useCsmConversationMessages";
@@ -540,6 +543,25 @@ export default function CsmCaseDetailPage(): JSX.Element {
     isFetching: isFetchingChat,
   } = useGetCsmConversationMessages(data?.conversationId);
   const postComment = usePostCsmCaseComment();
+  const patchComment = usePatchComment();
+  const deleteComment = useDeleteComment();
+  const onEditComment = useCallback(
+    (commentId: string, content: string) =>
+      patchComment.mutateAsync({
+        commentId,
+        content,
+        invalidateQueryKey: [ApiQueryKeys.CSM_CASE_COMMENTS, caseId],
+      }),
+    [patchComment, caseId],
+  );
+  const onDeleteComment = useCallback(
+    (commentId: string) =>
+      deleteComment.mutateAsync({
+        commentId,
+        invalidateQueryKey: [ApiQueryKeys.CSM_CASE_COMMENTS, caseId],
+      }),
+    [deleteComment, caseId],
+  );
   const {
     data: attachments,
     isLoading: isAttachmentsLoading,
@@ -2703,6 +2725,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
                     previewTarget,
                     onPreviewTargetChange: setPreviewTarget,
                   }}
+                  onEditComment={onEditComment}
+                  onDeleteComment={onDeleteComment}
                 />
               </>
             )}
