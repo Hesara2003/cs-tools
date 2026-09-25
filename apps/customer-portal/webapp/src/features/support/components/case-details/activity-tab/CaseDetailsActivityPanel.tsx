@@ -131,7 +131,7 @@ export default function CaseDetailsActivityPanel({
     [mergedTimeline],
   );
 
-  const isCaseClosed = caseStatus?.toLowerCase() === "closed";
+  const isCaseClosed = caseStatus?.toLowerCase() === "closed" || !!closedOn;
   // Never invent an actor — if the API didn't return who closed the case,
   // say so plainly instead of implying an automated/system closure.
   const closedByLabel = closedBy?.label ?? closedBy?.name ?? "Not available";
