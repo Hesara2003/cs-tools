@@ -618,9 +618,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// CaseService — reads always stay on Postgres in this mode. It
 		// serves four purposes: CreateCase calls its CreateCase directly and
 		// synchronously; UpdateCase dispatches to its patchCaseFields (via
-		// the snFieldPatcher interface) through caseWriteback, asynchronously;
+		// the snFieldPatcher interface) through snWritebackDispatcher, asynchronously;
 		// CreateCaseComment dispatches to its CreateBareCaseComment (via the
-		// snCommentMirror interface) through caseWriteback, asynchronously;
+		// snCommentMirror interface) through snWritebackDispatcher, asynchronously;
 		// and it is caseAttachmentOverrideSvc below, for case attachments
 		// specifically.
 		snCaseMirrorSvc := service.NewServiceNowCaseService(serviceNowIntegrationServiceClient, nil, nil, snUserService, cfg.CustomerRoles)
@@ -816,8 +816,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// createIncidentSNFirst itself, after that Postgres insert
 		// succeeds -- see NewIncidentServiceWithSNMirror's own doc comment
 		// and publishIncidentCreatedEvent's.
+		//
+		// snWritebackDispatcher (the single shared instance constructed once
+		// above) is reused as-is for incident UPDATE's async ServiceNow
+		// mirror -- a *SNWritebackDispatcher is just a fixed background
+		// worker pool plus one sn_writeback_failures repository, nothing
+		// case-specific about it, so a second instance would only mean a
+		// second, redundant worker pool.
 		snIncidentMirrorSvc := service.NewServiceNowIncidentService(serviceNowIntegrationServiceClient, nil)
-		activeIncidentSvc = service.NewIncidentServiceWithSNMirror(incidentRepo, snIncidentMirrorSvc, eventPublisher)
+		activeIncidentSvc = service.NewIncidentServiceWithSNMirror(incidentRepo, userRepo, snIncidentMirrorSvc, eventPublisher, snWritebackDispatcher)
 	default:
 		activeIncidentSvc = service.NewIncidentService(incidentRepo)
 	}
