@@ -3190,6 +3190,43 @@ type Comment struct {
 	// is populated when the backing data source resolved the author to a real
 	// user record, and null otherwise. See UserReference.
 	CreatedBy *UserReference `json:"createdBy"`
+	// LastEditedOn is set once the comment has been edited at least once via
+	// PATCH /comments/{id} (Postgres data source only -- see
+	// repository.CommentRow.LastEditedAt).
+	LastEditedOn *time.Time `json:"lastEditedOn,omitempty"`
+	// IsDeleted reflects the comment's soft-delete state. Content is only
+	// ever the caller-visible representation of a deleted comment (see
+	// commentService's own visibility rule doc comment): the literal string
+	// "[deleted]" for a non-admin internal caller, the real content for an
+	// admin, and never returned at all to a customer caller (the row itself
+	// is omitted from that caller's results).
+	IsDeleted bool `json:"isDeleted,omitempty"`
+}
+
+// UpdateCommentRequest is the input for PATCH /comments/{id}. ID is populated
+// from the URL path parameter and is not part of the JSON body.
+type UpdateCommentRequest struct {
+	ID      string `json:"-"`
+	Content string `json:"content"`
+}
+
+// UpdateCommentResponse is the response for PATCH /comments/{id}.
+type UpdateCommentResponse struct {
+	Message string  `json:"message"`
+	Comment Comment `json:"comment"`
+}
+
+// CommentEditHistoryEntry is one prior version of a comment's body, newest
+// first, returned by GET /comments/{id}/history.
+type CommentEditHistoryEntry struct {
+	Body     string    `json:"body"`
+	EditedBy string    `json:"editedBy"`
+	EditedOn time.Time `json:"editedOn"`
+}
+
+// GetCommentEditHistoryResponse is the response for GET /comments/{id}/history.
+type GetCommentEditHistoryResponse struct {
+	History []CommentEditHistoryEntry `json:"history"`
 }
 
 // SearchCommentsRequest is the input for POST /comments/search.

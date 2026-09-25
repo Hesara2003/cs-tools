@@ -3816,6 +3816,166 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /comments/{id}:
+    patch:
+      summary: Edit an existing comment's content.
+      description: >-
+        Postgres data source only (returns 503 on ServiceNow -- its journal entries are
+        append-only). Only the comment's original author or a caller holding the admin role
+        may edit it. The pre-edit content is preserved as a comment_edit_history row for audit;
+        GET /comments/{id}/history lists them.
+      operationId: updateComment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Comment UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCommentRequest'
+      responses:
+        "200":
+          description: The updated comment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateCommentResponse'
+        "400":
+          description: Bad request, or the comment is already deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Caller is neither the comment's author nor an admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Comment not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Not supported by the configured data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Soft-delete a comment.
+      description: >-
+        Postgres data source only (returns 503 on ServiceNow). Content is retained in the
+        database but hidden from non-admin visibility: excluded entirely from a customer
+        caller's results, shown as "[deleted]" to a non-admin internal caller, and shown
+        unredacted to an admin caller. Only the comment's original author or an admin may
+        delete it.
+      operationId: deleteComment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Comment UUID.
+      responses:
+        "204":
+          description: Comment soft-deleted.
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Caller is neither the comment's author nor an admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Comment not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Comment is already deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Not supported by the configured data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /comments/{id}/history:
+    get:
+      summary: List a comment's edit history.
+      description: >-
+        Postgres data source only (returns 503 on ServiceNow). Newest first. Only the comment's
+        original author or a caller holding the admin role may view its edit history -- the same
+        restriction as PATCH/DELETE on this comment, since a prior comment body can carry the
+        same sensitive content the current body does.
+      operationId: getCommentEditHistory
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Comment UUID.
+      responses:
+        "200":
+          description: The comment's edit history, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetCommentEditHistoryResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Caller is neither the comment's author nor an admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Comment not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: Not supported by the configured data source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /cases/{id}/activities/search:
     post:
       summary: Search the activity feed of a support case (comments, attachments, and optional field changes).
@@ -15494,6 +15654,54 @@ components:
           description: Timestamp when the comment was created.
         createdBy:
           $ref: '#/components/schemas/UserReference'
+        lastEditedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set once the comment has been edited at least once via PATCH /comments/{id}.
+        isDeleted:
+          type: boolean
+          description: >-
+            True once the comment has been soft-deleted via DELETE /comments/{id}. Content is
+            "[deleted]" for a non-admin internal caller and the real content for an admin caller;
+            a customer caller never receives a deleted comment at all.
+
+    UpdateCommentRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+
+    UpdateCommentResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        comment:
+          $ref: '#/components/schemas/Comment'
+
+    CommentEditHistoryEntry:
+      type: object
+      properties:
+        body:
+          type: string
+          description: The comment's content before this edit was applied.
+        editedBy:
+          type: string
+          description: Email of the user who made this edit.
+        editedOn:
+          type: string
+          format: date-time
+
+    GetCommentEditHistoryResponse:
+      type: object
+      properties:
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommentEditHistoryEntry'
+          description: Prior versions of the comment's content, newest first.
 
     SearchCommentsRequest:
       type: object

@@ -1191,6 +1191,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 
 	mux.HandleFunc("POST /comments", commentHandler.CreateComment)
 	mux.HandleFunc("POST /comments/search", commentHandler.SearchComments)
+	mux.HandleFunc("PATCH /comments/{id}", commentHandler.UpdateComment)
+	mux.HandleFunc("DELETE /comments/{id}", commentHandler.DeleteComment)
+	mux.HandleFunc("GET /comments/{id}/history", commentHandler.GetCommentEditHistory)
 
 	mux.HandleFunc("GET /slas/{id}", taskSlaHandler.GetTaskSla)
 	mux.HandleFunc("POST /slas/search", taskSlaHandler.SearchTaskSlas)
