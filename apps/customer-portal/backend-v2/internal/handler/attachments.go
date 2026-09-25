@@ -43,11 +43,32 @@ type entityAttachmentClient interface {
 // AttachmentHandler handles HTTP requests for attachment operations.
 type AttachmentHandler struct {
 	entity entityAttachmentClient
+	roles  middleware.RoleResolver
 }
 
-// NewAttachmentHandler creates an AttachmentHandler backed by the given entity client.
-func NewAttachmentHandler(entity entityAttachmentClient) *AttachmentHandler {
-	return &AttachmentHandler{entity: entity}
+// NewAttachmentHandler creates an AttachmentHandler backed by the given entity
+// client and role resolver. The resolver is needed because DeleteAttachment
+// (see its doc comment) is the one delete path for every attachment type and
+// has to pick its permission module at request time, after the attachment's
+// own referenceType is known -- it can't be wrapped with a single static
+// middleware.RequirePermission the way every other route in this backend is.
+func NewAttachmentHandler(entity entityAttachmentClient, roles middleware.RoleResolver) *AttachmentHandler {
+	return &AttachmentHandler{entity: entity, roles: roles}
+}
+
+// attachmentReferenceModule maps an attachment's referenceType to the
+// permission-matrix module that governs deleting it. nil (entity-service
+// doesn't always report a reference type -- see AttachmentDetails' doc
+// comment), change_request, and incident attachments have no dedicated
+// module in the matrix (this backend has no change_request/incident
+// attachment routes today) all fall back to ModuleCases -- delete is
+// admin-only there, the strictest module available, which is the correct
+// fail-closed default when the reference type is absent or unmodeled.
+func attachmentReferenceModule(refType *entity.ReferenceType) middleware.Module {
+	if refType != nil && *refType == entity.ReferenceTypeDeployment {
+		return middleware.ModuleDeployments
+	}
+	return middleware.ModuleCases
 }
 
 // CreateAttachment handles POST /attachments.
@@ -153,16 +174,36 @@ func (h *AttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// This route is not nested under a case, so the case has to be recovered
-	// from the attachment's own referenceId before the closed-case rule can be
-	// applied. referenceId may name a deployment or conversation instead, in
-	// which case caseIsClosed's fail-open lookup leaves the delete untouched.
-	if attachment, err := h.entity.GetAttachment(r.Context(), id); err == nil && attachment.ReferenceID != "" {
-		if caseIsClosed(r.Context(), h.entity, attachment.ReferenceID) {
-			slog.WarnContext(r.Context(), "rejected attachment delete on a closed case", "userID", user.UserID, "attachmentID", id, "caseID", attachment.ReferenceID)
-			writeError(w, http.StatusBadRequest, ErrMsgCaseClosedForAttachmentDelete)
-			return
-		}
+	// This route is not nested under a case (or deployment, or conversation),
+	// so the attachment has to be fetched first to learn what it actually
+	// references -- both for the closed-case rule below and, now, for
+	// authorization: this is the only delete path for every attachment type,
+	// so it cannot be wrapped with a single static middleware.RequirePermission
+	// the way every other route in this backend is. A lookup failure fails
+	// closed (403), not open -- unlike the closed-case check below, which
+	// fails open by design (see caseIsClosed's doc comment).
+	attachment, err := h.entity.GetAttachment(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity GetAttachment failed during DeleteAttachment", "userID", user.UserID, "attachmentID", id, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to delete attachment.")
+		return
+	}
+
+	roles, err := h.roles.GetRoles(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "rbac: failed to resolve roles for DeleteAttachment", "userID", user.UserID, "err", summarizeErr(err))
+		writeError(w, http.StatusBadGateway, "Failed to resolve user roles.")
+		return
+	}
+	if !middleware.HasPermission(roles, attachmentReferenceModule(attachment.ReferenceType), middleware.ActionDelete) {
+		writeError(w, http.StatusForbidden, ErrMsgForbidden)
+		return
+	}
+
+	if attachment.ReferenceID != "" && caseIsClosed(r.Context(), h.entity, attachment.ReferenceID) {
+		slog.WarnContext(r.Context(), "rejected attachment delete on a closed case", "userID", user.UserID, "attachmentID", id, "caseID", attachment.ReferenceID)
+		writeError(w, http.StatusBadRequest, ErrMsgCaseClosedForAttachmentDelete)
+		return
 	}
 
 	result, err := h.entity.DeleteAttachment(r.Context(), id)

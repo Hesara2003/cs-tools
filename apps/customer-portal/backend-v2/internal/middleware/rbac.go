@@ -50,7 +50,15 @@ func NormalizeRole(roleStr string) CanonicalRole {
 	switch trimmed {
 	case "sn_customerservice.admin", "admin":
 		return RoleAdmin
-	case "wso2_agent", "agent":
+	// sn_customerservice.commenter / sn_customerservice.timecard_approver are
+	// ServiceNow's finer-grained WSO2-support-staff sub-roles (support-staff
+	// members scoped to commenting or timecard approval specifically). They
+	// carry no dedicated canonical role of their own -- a holder is a support
+	// agent, so they resolve to agent the same way wso2_agent does. Before this
+	// case existed, either string fell through to the default branch and
+	// silently failed closed (granted nothing), the same class of gap that
+	// blocked "internal" users from projects:update (see d0feb9eae).
+	case "wso2_agent", "agent", "sn_customerservice.commenter", "sn_customerservice.timecard_approver":
 		return RoleAgent
 	case "sn_customerservice.customer_admin", "customer_admin":
 		return RoleCustomerAdmin

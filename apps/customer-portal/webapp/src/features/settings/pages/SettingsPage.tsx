@@ -26,7 +26,7 @@ import SettingsDisplay from "@features/settings/components/SettingsDisplay";
 import SettingsUserManagement from "@features/settings/components/SettingsUserManagement";
 import SettingsRegistryTokens from "@features/settings/components/SettingsRegistryTokens";
 import {
-  SETTINGS_CUSTOMER_ADMIN_ROLE,
+  isCustomerAdminRole,
   SETTINGS_PAGE_TABS,
   SETTINGS_PROJECT_NOT_FOUND_MESSAGE,
 } from "@features/settings/constants/settingsConstants";
@@ -53,7 +53,7 @@ export default function SettingsPage(): JSX.Element {
   const { data: projectDetails } = useGetProjectDetails(projectId || "");
 
   const isCustomerAdmin = useMemo(
-    () => (userDetails?.roles ?? []).includes(SETTINGS_CUSTOMER_ADMIN_ROLE),
+    () => isCustomerAdminRole(userDetails?.roles ?? []),
     [userDetails?.roles],
   );
 

@@ -25,7 +25,18 @@ import (
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
+	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/middleware"
 )
+
+// fakeAllowAllRoleResolver resolves every caller to admin, the broadest
+// canonical role, so these tests keep exercising only the closed-case guard
+// they're named for rather than also needing to satisfy DeleteAttachment's
+// permission check. Permission-check behavior itself is covered separately.
+type fakeAllowAllRoleResolver struct{}
+
+func (fakeAllowAllRoleResolver) GetRoles(ctx context.Context) ([]middleware.CanonicalRole, error) {
+	return []middleware.CanonicalRole{middleware.RoleAdmin}, nil
+}
 
 // A closed case's attachments are read-only. entity-service still accepts the
 // write and the webapp only disables the controls, so these tests cover the
@@ -229,9 +240,16 @@ func TestDeleteAttachment_ClosedCase(t *testing.T) {
 			client:     fakeClosedCaseAttachmentClient{referenceID: testCaseID, getCaseErr: errors.New("404 not found")},
 			wantStatus: http.StatusOK,
 		},
+		// Unlike the closed-case guard (which fails open by design -- see its
+		// doc comment), the same GetAttachment lookup now also backs the
+		// permission check (attachmentReferenceModule needs the fetched
+		// attachment's referenceType). A lookup failure can no longer let the
+		// delete through: doing so was the exact gap that let any
+		// authenticated caller delete any attachment with no permission check
+		// at all.
 		"attachment lookup fails": {
 			client:     fakeClosedCaseAttachmentClient{getAttachmentErr: errors.New("upstream down")},
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusInternalServerError,
 		},
 		"attachment has no reference": {
 			client:     fakeClosedCaseAttachmentClient{referenceID: "", caseState: "closed"},
@@ -242,7 +260,7 @@ func TestDeleteAttachment_ClosedCase(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			fake := tc.client
-			h := NewAttachmentHandler(&fake)
+			h := NewAttachmentHandler(&fake, fakeAllowAllRoleResolver{})
 
 			mux := http.NewServeMux()
 			mux.HandleFunc("DELETE /attachments/{id}", h.DeleteAttachment)
@@ -261,6 +279,12 @@ func TestDeleteAttachment_ClosedCase(t *testing.T) {
 				}
 				if fake.deleted {
 					t.Error("entity-service DeleteAttachment was called for a closed case's attachment")
+				}
+				return
+			}
+			if tc.wantStatus != http.StatusOK {
+				if fake.deleted {
+					t.Error("entity-service DeleteAttachment was called despite a failed request")
 				}
 				return
 			}

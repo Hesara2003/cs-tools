@@ -58,6 +58,16 @@ export function normalizeCustomerRole(roleStr: string): CanonicalRole {
       return "admin";
     case "wso2_agent":
     case "agent":
+    // sn_customerservice.commenter / sn_customerservice.timecard_approver are
+    // ServiceNow's finer-grained WSO2-support-staff sub-roles (support-staff
+    // scoped to commenting or timecard approval specifically) — no dedicated
+    // canonical role of their own, so a holder resolves to agent the same way
+    // wso2_agent does. Before this case existed, either string fell through
+    // to the default passthrough and silently failed closed (granted
+    // nothing), the same class of gap that blocked "internal" users from
+    // projects:update (see d0feb9eae).
+    case "sn_customerservice.commenter":
+    case "sn_customerservice.timecard_approver":
       return "agent";
     case "sn_customerservice.customer_admin":
     case "customer_admin":

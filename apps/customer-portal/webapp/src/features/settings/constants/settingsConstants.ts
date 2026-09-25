@@ -33,6 +33,7 @@ import {
 } from "@features/settings/types/settings";
 import { FONT_SIZE_PX } from "@context/font-size/FontSizeContext";
 import { NULL_PLACEHOLDER as COMMON_NULL_PLACEHOLDER } from "@constants/common";
+import { normalizeCustomerRoles } from "@hooks/useCustomerPermissions";
 
 /** Placeholder for empty/null values in user management UI. */
 export const NULL_PLACEHOLDER = COMMON_NULL_PLACEHOLDER;
@@ -40,18 +41,26 @@ export const NULL_PLACEHOLDER = COMMON_NULL_PLACEHOLDER;
 /** @deprecated Use NULL_PLACEHOLDER — same value for registry token tables. */
 export const SETTINGS_NULL_PLACEHOLDER = NULL_PLACEHOLDER;
 
-/** Role that can see AI Assistant tab and User Management Add/Delete. */
-export const SETTINGS_CUSTOMER_ADMIN_ROLE = "sn_customerservice.customer_admin";
+// SETTINGS_CUSTOMER_ADMIN_ROLE / SETTINGS_PARTNER_ROLE / SETTINGS_PARTNER_ADMIN_ROLE
+// used to be raw ServiceNow-namespaced role strings ("sn_customerservice.customer_admin"
+// etc.), checked with a plain roles.includes(...). That silently failed for any
+// caller whose role arrived in the bare Postgres-cutover form ("customer_admin",
+// "partner", "partner_admin") — the same gap that blocked the AI Assistant toggle
+// for "internal" before d0feb9eae. Both helpers below now normalize through
+// useCustomerPermissions' normalizeCustomerRoles, which already maps every known
+// wire form (ServiceNow-namespaced and bare) to one canonical role, so this can't
+// drift from the permission matrix again.
 
-/** ServiceNow partner role — triggers list view in ProjectHub when >4 projects. */
-export const SETTINGS_PARTNER_ROLE = "sn_customerservice.partner";
+/** Returns true if the given raw role list grants Customer Admin UI access
+ * (AI Assistant tab, User Management Add/Delete). */
+export function isCustomerAdminRole(roles: string[]): boolean {
+  return normalizeCustomerRoles(roles).includes("customer_admin");
+}
 
-/** ServiceNow partner admin role — same partner UI access as SETTINGS_PARTNER_ROLE. */
-export const SETTINGS_PARTNER_ADMIN_ROLE = "sn_customerservice.partner_admin";
-
-/** Returns true if the given role list grants partner-level UI access. */
+/** Returns true if the given raw role list grants partner-level UI access. */
 export function hasPartnerAccess(roles: string[]): boolean {
-  return roles.includes(SETTINGS_PARTNER_ROLE) || roles.includes(SETTINGS_PARTNER_ADMIN_ROLE);
+  const normalized = normalizeCustomerRoles(roles);
+  return normalized.includes("partner_admin") || normalized.includes("partner_user");
 }
 
 export const SETTINGS_PAGE_TABS = [

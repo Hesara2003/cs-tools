@@ -167,12 +167,14 @@ func main() {
 	tokenValidator := middleware.NewTokenValidator(authCfg)
 
 	userHandler := handler.NewUserHandler(entityClient, scimClient)
+	roleResolver := middleware.NewCachedRoleResolver(entityClient, 5*time.Minute)
+
 	projectHandler := handler.NewProjectHandler(entityClient)
 	projectStatsHandler := handler.NewProjectStatsHandler(entityClient)
 	caseHandler := handler.NewCaseHandler(entityClient)
 	deploymentHandler := handler.NewDeploymentHandler(entityClient)
 	deployedProductHandler := handler.NewDeployedProductHandler(entityClient)
-	attachmentHandler := handler.NewAttachmentHandler(entityClient)
+	attachmentHandler := handler.NewAttachmentHandler(entityClient, roleResolver)
 	productHandler := handler.NewProductHandler(entityClient)
 	changeRequestHandler := handler.NewChangeRequestHandler(entityClient)
 	callRequestHandler := handler.NewCallRequestHandler(entityClient)
@@ -187,7 +189,6 @@ func main() {
 	instanceHandler := handler.NewInstanceHandler(entityClient)
 	registryHandler := handler.NewRegistryHandler(entityClient, registryClient, adminRole)
 	contactHandler := handler.NewContactHandler(entityClient, userManagementClient)
-	roleResolver := middleware.NewCachedRoleResolver(entityClient, 5*time.Minute)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -343,7 +344,7 @@ func main() {
 	// The product-consumption service is a separate service (not
 	// entity-service) — see internal/productconsumption's package doc comment.
 	mux.HandleFunc("POST /projects/{projectId}/deployments/{deploymentId}/license", productConsumptionHandler.GetDeploymentLicense)
-	mux.HandleFunc("POST /deployment-usages", productConsumptionHandler.ImportDeploymentUsage)
+	mux.Handle("POST /deployment-usages", middleware.RequirePermission(roleResolver, middleware.ModuleDeployments, middleware.ActionCreate)(http.HandlerFunc(productConsumptionHandler.ImportDeploymentUsage)))
 
 	mux.HandleFunc("GET /updates/product-update-levels", updatesHandler.GetProductUpdateLevels)
 	mux.HandleFunc("POST /updates/levels/search", updatesHandler.SearchUpdatesBetweenUpdateLevels)
