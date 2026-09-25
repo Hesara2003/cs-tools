@@ -1163,3 +1163,24 @@ func (m *mockEntityTaskClient) UpdateTask(ctx context.Context, id string, body [
 	}
 	return []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`), nil
 }
+
+// ----- mock entity comment client -----
+
+type mockEntityCommentClient struct {
+	updateCommentFn func(ctx context.Context, id string, body []byte) ([]byte, error)
+	deleteCommentFn func(ctx context.Context, id string) ([]byte, error)
+}
+
+func (m *mockEntityCommentClient) UpdateComment(ctx context.Context, id string, body []byte) ([]byte, error) {
+	if m.updateCommentFn != nil {
+		return m.updateCommentFn(ctx, id, body)
+	}
+	return []byte(`{"id":"` + id + `","content":"updated"}`), nil
+}
+
+func (m *mockEntityCommentClient) DeleteComment(ctx context.Context, id string) ([]byte, error) {
+	if m.deleteCommentFn != nil {
+		return m.deleteCommentFn(ctx, id)
+	}
+	return nil, nil
+}

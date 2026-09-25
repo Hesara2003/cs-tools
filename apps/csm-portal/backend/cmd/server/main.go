@@ -123,6 +123,7 @@ func main() {
 	incidentTaskHandler := handler.NewIncidentTaskHandler(customerEntityClient)
 	alertHandler := handler.NewAlertHandler(customerEntityClient)
 	outageHandler := handler.NewOutageHandler(customerEntityClient)
+	commentHandler := handler.NewCommentHandler(customerEntityClient)
 
 	// Google Chat is not yet configured for every deployment, so its spaces
 	// are read with os.Getenv (never mustEnv) — a missing or malformed value
@@ -201,6 +202,13 @@ func main() {
 	route("POST /cases/{id}/request-update", handler.PermWrite, caseHandler.RequestCaseUpdate)
 	route("GET /case-update-request-templates", handler.PermView, caseHandler.GetCaseUpdateRequestTemplates)
 	route("POST /cases/{id}/comments/search", handler.PermView, caseHandler.SearchCaseComments)
+	// Generic comment edit/delete — applies to a comment by id regardless of
+	// which aggregate (case, change request, incident, ...) it was created
+	// under. Case, incident and change-request comments are PermWrite (see
+	// backend CLAUDE.md's Access control section); this is the same
+	// underlying resource.
+	route("PATCH /comments/{id}", handler.PermWrite, commentHandler.UpdateComment)
+	route("DELETE /comments/{id}", handler.PermWrite, commentHandler.DeleteComment)
 	route("POST /cases/{id}/activities/search", handler.PermView, caseHandler.SearchCaseActivities)
 	route("GET /cases/{id}/escalations", handler.PermView, caseHandler.GetCaseEscalations)
 	route("POST /cases/{id}/escalations", handler.PermEscalate, caseHandler.CreateCaseEscalation)
