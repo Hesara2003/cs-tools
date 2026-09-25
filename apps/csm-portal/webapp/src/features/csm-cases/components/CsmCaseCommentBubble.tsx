@@ -142,6 +142,7 @@ export default function CsmCaseCommentBubble({
   const [editError, setEditError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const isBot = comment.authorRole === "chatbot";
   // A chatbot (Novera) message body is Markdown; render it to HTML first. Every
   // other comment body is already rich-text HTML and goes through the same
@@ -343,13 +344,17 @@ export default function CsmCaseCommentBubble({
   const confirmDelete = async (): Promise<void> => {
     if (!onDeleteComment) return;
     setIsDeleting(true);
+    setDeleteError(null);
     try {
       await onDeleteComment();
       setDeleteConfirmOpen(false);
-    } catch {
-      // Left open on failure so the engineer can retry; the caller is
-      // expected to surface its own error (matching the attachment-delete
-      // confirm dialog's pattern on `CsmCaseDetailPage.tsx`).
+    } catch (e) {
+      // Left open on failure so the engineer can retry, with an inline error
+      // (same pattern as saveEdit above) — the callers (CsmCaseDetailPage,
+      // CsmChangeRequestDetailPage, CsmIncidentDetailPage) pass
+      // deleteComment.mutateAsync directly with no error handling of their
+      // own, so this dialog has to surface the failure itself.
+      setDeleteError(e instanceof Error ? e.message : "Failed to delete the comment.");
     } finally {
       setIsDeleting(false);
     }
@@ -546,6 +551,7 @@ export default function CsmCaseCommentBubble({
                   <MenuItem
                     onClick={() => {
                       setMenuAnchor(null);
+                      setDeleteError(null);
                       setDeleteConfirmOpen(true);
                     }}
                   >
@@ -726,6 +732,11 @@ export default function CsmCaseCommentBubble({
               admin, who still sees the original text. This can&apos;t be
               undone from here.
             </Typography>
+            {deleteError && (
+              <Typography variant="caption" color="error" sx={{ display: "block", mt: 1 }}>
+                {deleteError}
+              </Typography>
+            )}
           </DialogContent>
           <DialogActions>
             <Button

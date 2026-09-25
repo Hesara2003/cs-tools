@@ -317,7 +317,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CaseComment'
+                type: object
+                required:
+                  - message
+                  - comment
+                properties:
+                  message:
+                    type: string
+                  comment:
+                    $ref: '#/components/schemas/CaseComment'
         "400":
           description: BadRequest — malformed body, or the comment is already deleted.
           content:

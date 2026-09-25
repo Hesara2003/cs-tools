@@ -178,11 +178,13 @@ export function usePatchComment(): UseMutationResult<
   return useMutation<CsmCaseComment, Error, PatchCommentInput>({
     mutationFn: async (input): Promise<CsmCaseComment> => {
       const payload: BeCommentPatchPayload = { content: input.content };
-      const updated = await api.patch<BeCommentPatchPayload, BeComment>(
-        `/comments/${encodeURIComponent(input.commentId)}`,
-        payload,
-      );
-      return uiCommentFromBe(updated, { context: "case" });
+      // PATCH /comments/{id} returns { message, comment }, not a bare
+      // comment — the BFF forwards the entity service's response unchanged.
+      const updated = await api.patch<
+        BeCommentPatchPayload,
+        { message: string; comment: BeComment }
+      >(`/comments/${encodeURIComponent(input.commentId)}`, payload);
+      return uiCommentFromBe(updated.comment, { context: "case" });
     },
     onSuccess: (_updated, variables) => {
       void queryClient.invalidateQueries({
