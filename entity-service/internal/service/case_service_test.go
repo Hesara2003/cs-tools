@@ -311,10 +311,7 @@ func TestCaseService_SearchCases_RejectsUnsupportedPostgresFields(t *testing.T) 
 		name   string
 		filter domain.CaseFieldFilter
 	}{
-		{name: "product", filter: domain.CaseFieldFilter{Field: "product", Op: "in", Values: []string{"API Manager"}}},
 		{name: "projectType", filter: domain.CaseFieldFilter{Field: "projectType", Op: "in", Values: []string{"Subscription"}}},
-		{name: "creTeam", filter: domain.CaseFieldFilter{Field: "creTeam", Op: "in", Values: []string{"00000000-0000-0000-0000-000000000000"}}},
-		{name: "sreTeam", filter: domain.CaseFieldFilter{Field: "sreTeam", Op: "in", Values: []string{"00000000-0000-0000-0000-000000000000"}}},
 		{name: "assignedUserId isEmpty (Unassigned)", filter: domain.CaseFieldFilter{Field: "assignedUserId", Op: "isEmpty"}},
 		{name: "resolutionNotes isEmpty", filter: domain.CaseFieldFilter{Field: "resolutionNotes", Op: "isEmpty"}},
 		// state+in IS supported by this backend; only the exclusion is not.
@@ -388,6 +385,68 @@ func TestCaseService_SearchCases_SupportedFieldsStillReachRepository(t *testing.
 			}
 			if !called {
 				t.Fatalf("expected repo.SearchCases to be called for supported field %q", tc.name)
+			}
+		})
+	}
+}
+
+// TestCaseService_SearchCases_ProductAndTeamFiltersReachRepository is the
+// regression guard for the same "rejected outright despite a real backing
+// column" bug as the other filters above: product, creTeam and sreTeam used
+// to 400 unconditionally on this data source, even though caseRepo.SearchCases
+// already joins product (for ProductName in every result row) and, once this
+// fix's account/"group" joins were added, account.cre_team_id/sre_team_id the
+// same way GetCaseByID already resolves them.
+func TestCaseService_SearchCases_ProductAndTeamFiltersReachRepository(t *testing.T) {
+	creTeamID := "00000000-0000-0000-0000-000000000001"
+	sreTeamID := "00000000-0000-0000-0000-000000000002"
+	var got domain.SearchCasesRequest
+	repo := &stubCaseRepo{
+		searchCases: func(ctx context.Context, req domain.SearchCasesRequest) ([]domain.SearchCaseView, int, error) {
+			got = req
+			return nil, 0, nil
+		},
+	}
+	svc := NewCaseService(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{})
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	req := domain.SearchCasesRequest{Filters: domain.SearchCasesFilters{
+		Filters: []domain.CaseFieldFilter{
+			{Field: "product", Op: "in", Values: []string{"Asgardeo"}},
+			{Field: "creTeam", Op: "in", Values: []string{creTeamID}},
+			{Field: "sreTeam", Op: "in", Values: []string{sreTeamID}},
+		},
+	}}
+	if _, err := svc.SearchCases(ctx, req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got.Parsed.ProductNames) != 1 || got.Parsed.ProductNames[0] != "Asgardeo" {
+		t.Errorf("ProductNames = %v, want [Asgardeo]", got.Parsed.ProductNames)
+	}
+	if len(got.Parsed.CreTeamIDs) != 1 || got.Parsed.CreTeamIDs[0] != creTeamID {
+		t.Errorf("CreTeamIDs = %v, want [%s]", got.Parsed.CreTeamIDs, creTeamID)
+	}
+	if len(got.Parsed.SreTeamIDs) != 1 || got.Parsed.SreTeamIDs[0] != sreTeamID {
+		t.Errorf("SreTeamIDs = %v, want [%s]", got.Parsed.SreTeamIDs, sreTeamID)
+	}
+}
+
+// TestCaseService_SearchCases_RejectsMalformedTeamUUID proves creTeam/sreTeam
+// still validate as UUIDs before reaching the repository -- only the blanket
+// "unsupported on Postgres" rejection was removed.
+func TestCaseService_SearchCases_RejectsMalformedTeamUUID(t *testing.T) {
+	svc := NewCaseService(&stubCaseRepo{}, stubUserRepo{}, nil, alwaysUnrestrictedAccess{})
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	for _, field := range []string{"creTeam", "sreTeam"} {
+		t.Run(field, func(t *testing.T) {
+			req := domain.SearchCasesRequest{Filters: domain.SearchCasesFilters{
+				Filters: []domain.CaseFieldFilter{{Field: field, Op: "in", Values: []string{"not-a-uuid"}}},
+			}}
+			_, err := svc.SearchCases(ctx, req)
+			var ve *apierror.ValidationError
+			if !asValidationError(err, &ve) {
+				t.Fatalf("expected *apierror.ValidationError, got %T: %v", err, err)
 			}
 		})
 	}

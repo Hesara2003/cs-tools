@@ -1811,6 +1811,30 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		where += " AND EXISTS (SELECT 1 FROM sla tsla WHERE " + slaWhere + ")"
 	}
 
+	// product: matched on the deployed product's own catalog name (prod is
+	// the LEFT JOIN below) -- exact match against the same prod.name value
+	// SearchCases already selects into each row's ProductName.
+	if len(req.Parsed.ProductNames) > 0 {
+		where += fmt.Sprintf(" AND prod.name = ANY($%d::text[])", argIdx)
+		filterArgs = append(filterArgs, req.Parsed.ProductNames)
+		argIdx++
+	}
+
+	// creTeam/sreTeam: the parent account's CRE/SRE-owning "group" (a and
+	// cre/sre are the LEFT JOINs below) -- the same account.cre_team_id/
+	// sre_team_id -> "group" path GetCaseByID already resolves for its own
+	// CreTeam/SreTeam fields.
+	if len(req.Parsed.CreTeamIDs) > 0 {
+		where += fmt.Sprintf(" AND cre.id = ANY($%d::uuid[])", argIdx)
+		filterArgs = append(filterArgs, req.Parsed.CreTeamIDs)
+		argIdx++
+	}
+	if len(req.Parsed.SreTeamIDs) > 0 {
+		where += fmt.Sprintf(" AND sre.id = ANY($%d::uuid[])", argIdx)
+		filterArgs = append(filterArgs, req.Parsed.SreTeamIDs)
+		argIdx++
+	}
+
 	// escalation (isEmpty / isNotEmpty): whether the case itself carries an active
 	// escalation, matched on "case".is_escalated -- the flag the case detail
 	// exposes as isEscalated. A row with no "case" row (a non-case work item) has
@@ -1864,6 +1888,9 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 	joins := `LEFT JOIN "case" c ON c.id = wi.id
 		 ` + caseLikeJoins + `
 		 LEFT JOIN project p ON p.id = wi.project_id
+		 LEFT JOIN account a ON a.id = wi.account_id
+		 LEFT JOIN "group" cre ON cre.id = a.cre_team_id
+		 LEFT JOIN "group" sre ON sre.id = a.sre_team_id
 		 LEFT JOIN deployment d ON d.id = wi.deployment_id
 		 LEFT JOIN deployed_product dp ON dp.id = wi.deployed_product_id
 		 LEFT JOIN product prod ON prod.id = dp.product_id

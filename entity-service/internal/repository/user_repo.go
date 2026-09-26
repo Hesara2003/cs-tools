@@ -201,14 +201,25 @@ func (r *userRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReques
 		// ("deliberately an open string type"). Matches if the user holds
 		// ANY of the given roles (OR semantics), via user_role (migration
 		// 000006).
+		//
+		// The synced role.name value carries a namespace prefix for at
+		// least some roles (e.g. "sn_customerservice.timecard_approver" --
+		// see the webapp's own ROLE_CATALOGUE_ALIASES, which exists purely
+		// to strip this same prefix back off for display), while a caller
+		// filtering by roleIds sends the bare, unnamespaced name (matching
+		// CSM_USER_ROLES' own vocabulary). Matching on the suffix after the
+		// last "." as well as the exact value handles either shape without
+		// hardcoding a specific namespace string, and never matches less
+		// than a plain r.name = ANY(...) would have on its own.
 		roleNames := make([]string, len(req.Filters.RoleIDs))
 		for i, role := range req.Filters.RoleIDs {
 			roleNames[i] = string(role)
 		}
 		where += fmt.Sprintf(` AND EXISTS (
 			SELECT 1 FROM user_role ur JOIN role r ON r.id = ur.role_id
-			WHERE ur.user_id = u.id AND r.name = ANY($%d::text[])
-		)`, argIdx)
+			WHERE ur.user_id = u.id
+			  AND (r.name = ANY($%d::text[]) OR regexp_replace(r.name, '^.*\.', '') = ANY($%d::text[]))
+		)`, argIdx, argIdx)
 		filterArgs = append(filterArgs, roleNames)
 		argIdx++
 	}
