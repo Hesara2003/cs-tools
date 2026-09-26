@@ -33,7 +33,7 @@ func (f fakePinger) Health(ctx context.Context) error {
 }
 
 func TestHealthHandler_GetHealthDependencies_AllHealthy(t *testing.T) {
-	h := NewHealthHandler(fakePinger{}, fakePinger{}, fakePinger{}, fakePinger{})
+	h := NewHealthHandler(fakePinger{}, fakePinger{}, fakePinger{}, fakePinger{}, fakePinger{})
 
 	w := httptest.NewRecorder()
 	h.GetHealthDependencies(w, httptest.NewRequest(http.MethodGet, "/health/dependencies", nil))
@@ -43,13 +43,10 @@ func TestHealthHandler_GetHealthDependencies_AllHealthy(t *testing.T) {
 	if resp.Status != "ok" {
 		t.Errorf("Status = %q, want ok", resp.Status)
 	}
-	if len(resp.Dependencies) != 4 {
-		t.Fatalf("len(Dependencies) = %d, want 4", len(resp.Dependencies))
+	if len(resp.Dependencies) != 5 {
+		t.Fatalf("len(Dependencies) = %d, want 5", len(resp.Dependencies))
 	}
 	for _, d := range resp.Dependencies {
-		if d.Name == "engineering-entity" {
-			t.Error("engineering-entity must not appear — it has no health endpoint to check")
-		}
 		if d.Status != "ok" {
 			t.Errorf("%s status = %q, want ok", d.Name, d.Status)
 		}
@@ -57,7 +54,7 @@ func TestHealthHandler_GetHealthDependencies_AllHealthy(t *testing.T) {
 }
 
 func TestHealthHandler_GetHealthDependencies_OneDown(t *testing.T) {
-	h := NewHealthHandler(fakePinger{}, fakePinger{err: errors.New("boom")}, fakePinger{}, fakePinger{})
+	h := NewHealthHandler(fakePinger{}, fakePinger{err: errors.New("boom")}, fakePinger{}, fakePinger{}, fakePinger{})
 
 	w := httptest.NewRecorder()
 	h.GetHealthDependencies(w, httptest.NewRequest(http.MethodGet, "/health/dependencies", nil))
@@ -69,20 +66,20 @@ func TestHealthHandler_GetHealthDependencies_OneDown(t *testing.T) {
 	}
 	var sawUpdatesDown bool
 	for _, d := range resp.Dependencies {
-		if d.Name == "updates" && d.Status == "down" {
+		if d.Name == "Updates Service" && d.Status == "down" {
 			sawUpdatesDown = true
 		}
 	}
 	if !sawUpdatesDown {
-		t.Error("expected updates to be reported down")
+		t.Error("expected Updates Service to be reported down")
 	}
 }
 
 func TestHealthHandler_GetHealthDependencies_NotConfiguredIsNotDown(t *testing.T) {
-	// notification/integration nil (unconfigured) must never drag the
-	// overall status into "degraded" — that's a deployment choice, not a
+	// notification/integration/engineering nil (unconfigured) must never drag
+	// the overall status into "degraded" — that's a deployment choice, not a
 	// dependency failure.
-	h := NewHealthHandler(fakePinger{}, fakePinger{}, nil, nil)
+	h := NewHealthHandler(fakePinger{}, fakePinger{}, nil, nil, nil)
 
 	w := httptest.NewRecorder()
 	h.GetHealthDependencies(w, httptest.NewRequest(http.MethodGet, "/health/dependencies", nil))
@@ -93,7 +90,8 @@ func TestHealthHandler_GetHealthDependencies_NotConfiguredIsNotDown(t *testing.T
 		t.Errorf("Status = %q, want ok", resp.Status)
 	}
 	for _, d := range resp.Dependencies {
-		if d.Name == "csm-notification-service" || d.Name == "csm-integration-service" {
+		switch d.Name {
+		case "CSM Notification Service", "CSM Integration Service", "Engineering Entity Service":
 			if d.Status != "not_configured" {
 				t.Errorf("%s status = %q, want not_configured", d.Name, d.Status)
 			}

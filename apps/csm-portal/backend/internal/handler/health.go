@@ -25,8 +25,8 @@ import (
 )
 
 // HealthPinger is satisfied by any upstream client that exposes a health
-// check — scim.Client, updates.Client, csmnotification.Client and
-// csmintegration.Client all do.
+// check — scim.Client, updates.Client, csmnotification.Client,
+// csmintegration.Client and entity.EngineeringEntityClient all do.
 type HealthPinger interface {
 	Health(ctx context.Context) error
 }
@@ -67,30 +67,30 @@ type HealthDependenciesResponse struct {
 // working fine. This endpoint is for monitoring/on-call visibility; do not
 // wire it up as the restart-triggering probe.
 //
-// entity-service is deliberately not checked here — this backend depends on
-// it for nearly every request, and checking it is out of scope for this
-// aggregation by explicit product decision. Engineering Entity Service is
-// also not checked, and not listed at all: it has no health endpoint of its
-// own anywhere in its repo, so there's nothing here to call — reporting a
-// fixed "unknown" for it was tried first and dropped as noise, since it can
-// never be anything else until that service adds one.
+// entity-service (this repo's own core entity service, distinct from
+// Engineering Entity Service) is deliberately not checked here — this
+// backend depends on it for nearly every request, and checking it is out of
+// scope for this aggregation by explicit product decision.
 type HealthHandler struct {
 	scim         HealthPinger
 	updates      HealthPinger
 	notification HealthPinger // nil when CSM_NOTIFICATION_SERVICE_BASE_URL is unset
 	integration  HealthPinger // nil when CSM_INTEGRATION_SERVICE_BASE_URL is unset
+	engineering  HealthPinger // nil when ENGINEERING_ENTITY_BASE_URL is unset
 }
 
-// NewHealthHandler constructs a HealthHandler. notification/integration may
-// be nil (pass an untyped nil, never a nil-valued concrete pointer — see
-// entity-service's own CLAUDE.md for why a typed nil boxed into an interface
-// is a common bug here) when that service's base URL is not configured.
-func NewHealthHandler(scim, updates, notification, integration HealthPinger) *HealthHandler {
+// NewHealthHandler constructs a HealthHandler. Any of notification/
+// integration/engineering may be nil (pass an untyped nil, never a
+// nil-valued concrete pointer — see entity-service's own CLAUDE.md for why a
+// typed nil boxed into an interface is a common bug here) when that
+// service's base URL is not configured.
+func NewHealthHandler(scim, updates, notification, integration, engineering HealthPinger) *HealthHandler {
 	return &HealthHandler{
 		scim:         scim,
 		updates:      updates,
 		notification: notification,
 		integration:  integration,
+		engineering:  engineering,
 	}
 }
 
@@ -104,10 +104,11 @@ func (h *HealthHandler) GetHealthDependencies(w http.ResponseWriter, r *http.Req
 		name   string
 		pinger HealthPinger
 	}{
-		{"scim", h.scim},
-		{"updates", h.updates},
-		{"csm-notification-service", h.notification},
-		{"csm-integration-service", h.integration},
+		{"SCIM Service", h.scim},
+		{"Updates Service", h.updates},
+		{"CSM Notification Service", h.notification},
+		{"CSM Integration Service", h.integration},
+		{"Engineering Entity Service", h.engineering},
 	}
 
 	deps := make([]DependencyHealth, len(checks))

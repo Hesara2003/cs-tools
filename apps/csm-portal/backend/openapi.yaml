@@ -41,12 +41,12 @@ paths:
     get:
       summary: >-
         Aggregating dependency health check. Distinct from GET /health (a pure
-        liveness probe): this checks SCIM, Updates, csm-notification-service
-        and csm-integration-service (each optional except SCIM/Updates).
-        entity-service is not checked here, and neither is Engineering Entity
-        Service — it has no health endpoint of its own anywhere in its repo.
-        Do not wire this up as the liveness/restart probe — a downstream blip
-        here must not restart or drain an otherwise-healthy instance.
+        liveness probe): this checks SCIM Service, Updates Service, CSM
+        Notification Service, CSM Integration Service and Engineering Entity
+        Service (each optional except SCIM/Updates). This backend's own core
+        entity-service is not checked here. Do not wire this up as the
+        liveness/restart probe — a downstream blip here must not restart or
+        drain an otherwise-healthy instance.
       operationId: getHealthDependencies
       security: []
       responses:
@@ -9123,15 +9123,16 @@ components:
             properties:
               name:
                 type: string
-                enum: [scim, updates, csm-notification-service, csm-integration-service]
+                enum: [SCIM Service, Updates Service, CSM Notification Service, CSM Integration Service, Engineering Entity Service]
               status:
                 type: string
                 description: >-
                   "down" only ever means a real check failed; "not_configured"
-                  means this deployment has no base URL for that dependency.
+                  means this deployment has no base URL for that dependency
+                  (SCIM/Updates are always configured, so only see "ok"/"down").
                   No failure detail is included — this endpoint is
-                  unauthenticated and public. Engineering Entity Service and
-                  entity-service are never listed here — see this path's own
+                  unauthenticated and public. This backend's own core
+                  entity-service is never listed here — see this path's own
                   summary for why.
                 enum: [ok, down, not_configured]
 

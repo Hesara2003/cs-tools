@@ -133,7 +133,7 @@ Backs `entity.CustomerEntityClient` (this repo's entity-service; cases, accounts
 
 ### Engineering entity service (optional)
 
-Backs `entity.EngineeringEntityClient.CreateGitIssue` (a separate internal engineering entity service). When `ENGINEERING_ENTITY_BASE_URL` is set, `POST /cases/{id}/github-issues` files the issue through it instead of forwarding to the entity service; unset, that endpoint behaves exactly as before. It uses the same shared OAuth2 credentials above (`OAUTH2_CLIENT_ID`/`_CLIENT_SECRET`/`_TOKEN_URL`) — only its base URL and scopes are its own.
+Backs `entity.EngineeringEntityClient.CreateGitIssue` (a separate internal engineering entity service). When `ENGINEERING_ENTITY_BASE_URL` is set, `POST /cases/{id}/github-issues` files the issue through it instead of forwarding to the entity service; unset, that endpoint behaves exactly as before. It uses the same shared OAuth2 credentials above (`OAUTH2_CLIENT_ID`/`_CLIENT_SECRET`/`_TOKEN_URL`) — only its base URL and scopes are its own. The same configuration also backs its `GET /health/dependencies` check (see [Health](#health) above); unset, that dependency reports `not_configured` there too.
 
 | Variable | Description |
 |---|---|
@@ -373,7 +373,7 @@ backend/
 ### Health
 
 - `GET /health` — Liveness probe; always `200`, no dependency calls. Wire this up as the restart/drain-triggering probe
-- `GET /health/dependencies` — Aggregating dependency check: SCIM, Updates, csm-notification-service and csm-integration-service (each independently optional except SCIM/Updates). entity-service is not checked here, and neither is Engineering Entity Service — it has no health endpoint of its own anywhere in its repo yet. `200` when every checked dependency is `ok`, `503` if any is `down`. Do **not** wire this one up as a liveness/restart probe — see [Configuration](#configuration) and `internal/handler/health.go`'s own doc comment for why the two are kept separate
+- `GET /health/dependencies` — Aggregating dependency check: SCIM Service, Updates Service, CSM Notification Service, CSM Integration Service and Engineering Entity Service (each independently optional except SCIM/Updates). This backend's own core entity-service is not checked here. `200` when every checked dependency is `ok`, `503` if any is `down`. Do **not** wire this one up as a liveness/restart probe — see [Configuration](#configuration) and `internal/handler/health.go`'s own doc comment for why the two are kept separate
 
 ### Cases
 

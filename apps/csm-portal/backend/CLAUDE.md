@@ -79,17 +79,19 @@ already established for its own `/health` vs `/health/database`:
 - **`GET /health`** — pure liveness, always `200`, zero dependency calls. This is the one Choreo (or
   whatever orchestrator) should wire up as the restart/drain-triggering probe.
 - **`GET /health/dependencies`** (`internal/handler/health.go`) — aggregates this backend's own
-  upstream integrations: SCIM, Updates, `csm-notification-service`, `csm-integration-service`.
-  `entity-service` is deliberately excluded (this backend depends on it for nearly every request;
-  checking it here was an explicit product decision to leave out). Engineering Entity Service is
-  also not listed here at all — it has no health endpoint of its own anywhere in its repo today, so
-  there is nothing to call; add it back once `digiops-engineering` exposes one (see that repo's own
-  entity-service branch). Each listed dependency reports one of `ok`/`down`/`not_configured` —
-  `not_configured` for `csm-notification-service`/`csm-integration-service` when their base URL env
-  var is unset (both optional, same posture as `ENGINEERING_ENTITY_BASE_URL`). Checks run
-  concurrently, each bounded by its own 5s timeout so one slow upstream can't hang the whole
-  response. Overall `status` is `degraded` (HTTP `503`) if any dependency is `down`;
-  `not_configured` never counts as a failure on its own. **Never wire this one up as a
+  upstream integrations: `"SCIM Service"`, `"Updates Service"`, `"CSM Notification Service"`,
+  `"CSM Integration Service"`, `"Engineering Entity Service"` — the response's `name` values are
+  human-readable display names, not package/env-var identifiers, so use these exact strings (not
+  `csm-notification-service` or similar) when checking a caller against this response. This
+  backend's own core `entity-service` is deliberately excluded (this backend depends on it for
+  nearly every request; checking it here was an explicit product decision to leave out). Each
+  listed dependency reports one of `ok`/`down`/`not_configured` — `not_configured` when that
+  dependency's base URL env var is unset (`CSM_NOTIFICATION_SERVICE_BASE_URL`/
+  `CSM_INTEGRATION_SERVICE_BASE_URL`/`ENGINEERING_ENTITY_BASE_URL`, all optional; SCIM/Updates are
+  always configured so only ever report `ok`/`down`). Checks run concurrently, each bounded by its
+  own 5s timeout so one slow upstream can't hang the whole response. Overall `status` is `degraded`
+  (HTTP `503`) if any dependency is `down`; `not_configured` never counts as a failure on its own.
+  **Never wire this one up as a
   liveness/restart probe** — a brief SCIM or Updates outage failing this endpoint must not have the
   orchestrator restart or drain an otherwise-healthy instance of this backend, the same reasoning
   entity-service's own `/health` vs `/health/database` split documents. The response body carries no
@@ -103,7 +105,7 @@ Each upstream service has its own client package under `internal/`:
 
 | Package | Upstream | Notes |
 |---------|----------|-------|
-| `entity` | Multiple entity services (see below) | Hosts `CustomerEntityClient` (this repo's entity-service; most case/account/project endpoints, raw `[]byte` passthrough) and `EngineeringEntityClient` (a separate internal engineering entity service; `CreateGitIssue`, typed request/response). `EngineeringEntityClient` is constructed in `cmd/server/main.go` only when `ENGINEERING_ENTITY_BASE_URL` is set, and then `CaseHandler.CreateCaseGithubIssue` uses it (via `WithEngineeringClient`) instead of the entity service: the target must be a `GITHUB_ISSUE_REPO_OPTIONS` entry, and unlike the entity service's version it does not write the issue URL back to the case or tag a regression |
+| `entity` | Multiple entity services (see below) | Hosts `CustomerEntityClient` (this repo's entity-service; most case/account/project endpoints, raw `[]byte` passthrough) and `EngineeringEntityClient` (a separate internal engineering entity service; `CreateGitIssue`, typed request/response, plus `Health(ctx)` backing `GET /health/dependencies` — see "Health endpoints" above). `EngineeringEntityClient` is constructed in `cmd/server/main.go` only when `ENGINEERING_ENTITY_BASE_URL` is set, and then `CaseHandler.CreateCaseGithubIssue` uses it (via `WithEngineeringClient`) instead of the entity service: the target must be a `GITHUB_ISSUE_REPO_OPTIONS` entry, and unlike the entity service's version it does not write the issue URL back to the case or tag a regression |
 | `scim` | SCIM service | User/group lookups. Two orgs: `SearchUser` queries the "internal" org (WSO2 staff — phone number, last password update). `SearchExternalUser` queries the "external" org (customer/partner contacts — existence + lock status, mirroring `infra-operations/operations/asgardeo-user-check`'s `{exists, locked}` contract). `GetUser` calls the latter only when the entity response's `userType` isn't `internal`, and treats a lookup failure as best-effort — logged, response returned unchanged, never a failed request |
 | `updates` | Updates service | Product update levels; returns typed structs (not raw passthrough) |
 | `csmnotification` | `integrations/csm-notification-service` | Health check only today (`Health(ctx)`, backing `GET /health/dependencies` — see "Health endpoints" below). Optional: unconfigured (`CSM_NOTIFICATION_SERVICE_BASE_URL` unset) means this dependency reports `not_configured` |
