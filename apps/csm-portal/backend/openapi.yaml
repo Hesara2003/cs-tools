@@ -1708,8 +1708,12 @@ paths:
       description: >
         Returns the user row plus every group they belong to, the subset of those that are
         teams, and for external contacts their per-project access with the reason access is
-        or is not granted. ServiceNow data source only. A deactivated user is still
-        returned — that state is usually the answer the caller is looking for.
+        or is not granted. Available on both data sources. A deactivated user is still
+        returned — that state is usually the answer the caller is looking for. For an
+        internal (WSO2 staff) target, `roles` is replaced with the same portal-role
+        vocabulary `GET /users/me` reports (sourced from that user's own SCIM role
+        assignment, not entity-service's own role data); an external contact's `roles`
+        is left as entity-service returned it.
       operationId: getUserById
       parameters:
         - name: id

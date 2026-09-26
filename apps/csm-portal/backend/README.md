@@ -312,7 +312,9 @@ engineer (see `CreateCaseComment`); the role is necessary, not sufficient.
 holding no portal role. It comes from the same guard that authorises the routes, so what the frontend
 is told and what the backend enforces cannot disagree. This is the portal roles only: the entity
 service's own role data is no longer returned. The frontend decides what to show or hide from these
-roles; the backend's `403` is the real gate.
+roles; the backend's `403` is the real gate. `GET /users/{id}` reports the same vocabulary for an
+internal target (see that endpoint's own entry below) — sourced from SCIM instead of a JWT, since
+this endpoint is looking at someone *other* than the caller.
 
 ### Server
 
@@ -401,7 +403,7 @@ backend/
 - `GET /users/me` — Get current user profile (`id`, `email`, `firstName`, `lastName`, `timeZone` from entity service; `roles` are the portal roles granted by the caller's token; `phoneNumber` from SCIM)
 - `PATCH /users/me` — Update current user profile (`phoneNumber` via SCIM, `timeZone` via entity service)
 - `POST /users/search` — Search users; optional `filters` (`searchQuery`, `roles`, `userNames`, `emails`, `active`) and `sortBy` (`field`, `order`); response shape depends on data source (`User` for postgres, `SNUser` for ServiceNow)
-- `GET /users/{id}` — Get one user's full profile (ServiceNow data source only); adds `teams` (derived from `groups`) and, for external contacts only, `externalAccount` (`exists`/`locked`, from SCIM's "external" org search). Both are best-effort — absent rather than failing the request if their lookup fails
+- `GET /users/{id}` — Get one user's full profile (both data sources); adds `teams` (derived from `groups`) and, for external contacts only, `externalAccount` (`exists`/`locked`, from SCIM's "external" org search). For an internal (WSO2 staff) target, `roles` is replaced with the same portal-role vocabulary `GET /users/me` reports (`viewer`/`escalator`/.../`admin`), sourced from that user's own SCIM role assignment (filtered to this portal's `app-csm-*` roles) rather than entity-service's own role data — entity-service's `roles` is left as-is for an external contact, a genuinely different vocabulary. All three enrichments (teams, externalAccount, roles) are best-effort — absent/unchanged rather than failing the request if their lookup fails
 - `POST /users` — Create a new user (`firstName`, `lastName`, `email` required to have at least one of firstName/lastName; optional `roles`, validated against the configured role allow-list). **Admin-only** (`admin` permission — see "Access control" above); Postgres data source only
 
 ### Accounts

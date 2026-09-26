@@ -16,6 +16,8 @@
 
 package scim
 
+import "github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
+
 // ---- upstream (SCIM wire) types ----
 // These mirror the upstream service's SCIM record types.
 
@@ -49,6 +51,11 @@ type scimUser struct {
 	ID           string      `json:"id"`
 	PhoneNumbers []scimPhone `json:"phoneNumbers,omitempty"`
 	SchemaScope  *scimSchema `json:"urn:scim:wso2:schema,omitempty"`
+	// Roles is a bare string when the user holds exactly one role and an
+	// array when they hold several -- the same shape Asgardeo's JWT "roles"
+	// claim uses, hence reusing middleware.StringList's decoding rather than
+	// duplicating it.
+	Roles middleware.StringList `json:"roles,omitempty"`
 }
 
 type scimPhone struct {
@@ -80,7 +87,20 @@ type scimPhonePayload struct {
 type UserInfo struct {
 	PhoneNumber            *string
 	LastPasswordUpdateTime *string
+	// Roles is the user's full Asgardeo role assignment, spanning every
+	// application they hold a role in -- not just the CSM portal. A caller
+	// wanting only this portal's roles must filter for the app-specific
+	// prefix itself (see CSMAppRolePrefix).
+	Roles []string
 }
+
+// CSMAppRolePrefix marks a SCIM role as belonging to the CSM portal
+// application, as opposed to some other Asgardeo-registered app the same
+// person may also hold roles in. UserInfo.Roles carries every app's roles
+// unfiltered; a caller that needs just this portal's roles (e.g. to run
+// through AccessGuard.RolesFor for a user other than the caller, where no
+// JWT "roles" claim is available) filters by this prefix first.
+const CSMAppRolePrefix = "app-csm-"
 
 // ExternalUserInfo holds the SCIM "external" org existence/lock status for a
 // user, mirroring the asgardeo-user-check service's {exists, locked} contract.
