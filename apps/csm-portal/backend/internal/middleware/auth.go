@@ -119,8 +119,8 @@ func Auth(cfg Config) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			addSecurityHeaders(w)
 
-			// Skip auth for the health check endpoint.
-			if r.Method == http.MethodGet && r.URL.Path == "/health" {
+			// Skip auth for both health check endpoints.
+			if r.Method == http.MethodGet && (r.URL.Path == "/health" || r.URL.Path == "/health/dependencies") {
 				next.ServeHTTP(w, r)
 				return
 			}

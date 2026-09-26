@@ -70,6 +70,32 @@ different mechanisms, because the feature isn't backed by its own exclusive rout
   directly by id. Closing that fully needs entity-service itself to resolve and enforce it (it has
   reliable type data on either data source), not this BFF layer.
 
+## Health endpoints
+
+Two, registered directly on the mux in `cmd/server/main.go` (not through `route()`) and both exempt
+from `Auth` (`internal/middleware/auth.go` checks the exact path) — the same split entity-service
+already established for its own `/health` vs `/health/database`:
+
+- **`GET /health`** — pure liveness, always `200`, zero dependency calls. This is the one Choreo (or
+  whatever orchestrator) should wire up as the restart/drain-triggering probe.
+- **`GET /health/dependencies`** (`internal/handler/health.go`) — aggregates this backend's own
+  upstream integrations: SCIM, Updates, `csm-notification-service`, `csm-integration-service`, and
+  Engineering Entity Service. `entity-service` is deliberately excluded (this backend depends on it
+  for nearly every request; checking it here was an explicit product decision to leave out). Each
+  dependency reports one of `ok`/`down`/`not_configured`/`unknown` — `not_configured` for
+  `csm-notification-service`/`csm-integration-service` when their base URL env var is unset (both
+  optional, same posture as `ENGINEERING_ENTITY_BASE_URL`), `unknown` for Engineering Entity Service
+  always, since it has no health endpoint of its own to call regardless of whether it's configured.
+  Checks run concurrently, each bounded by its own 5s timeout so one slow upstream can't hang the
+  whole response. Overall `status` is `degraded` (HTTP `503`) if any dependency is `down`;
+  `not_configured`/`unknown` never count as a failure on their own. **Never wire this one up as a
+  liveness/restart probe** — a brief SCIM or Updates outage failing this endpoint must not have the
+  orchestrator restart or drain an otherwise-healthy instance of this backend, the same reasoning
+  entity-service's own `/health` vs `/health/database` split documents. The response body carries no
+  failure detail (no error message, no upstream status code) since this route is unauthenticated and
+  public, mirroring entity-service's own explicit "failure bodies carry no detail" convention for the
+  same reason.
+
 ## Upstream service modules
 
 Each upstream service has its own client package under `internal/`:
@@ -79,6 +105,8 @@ Each upstream service has its own client package under `internal/`:
 | `entity` | Multiple entity services (see below) | Hosts `CustomerEntityClient` (this repo's entity-service; most case/account/project endpoints, raw `[]byte` passthrough) and `EngineeringEntityClient` (a separate internal engineering entity service; `CreateGitIssue`, typed request/response). `EngineeringEntityClient` is constructed in `cmd/server/main.go` only when `ENGINEERING_ENTITY_BASE_URL` is set, and then `CaseHandler.CreateCaseGithubIssue` uses it (via `WithEngineeringClient`) instead of the entity service: the target must be a `GITHUB_ISSUE_REPO_OPTIONS` entry, and unlike the entity service's version it does not write the issue URL back to the case or tag a regression |
 | `scim` | SCIM service | User/group lookups. Two orgs: `SearchUser` queries the "internal" org (WSO2 staff — phone number, last password update). `SearchExternalUser` queries the "external" org (customer/partner contacts — existence + lock status, mirroring `infra-operations/operations/asgardeo-user-check`'s `{exists, locked}` contract). `GetUser` calls the latter only when the entity response's `userType` isn't `internal`, and treats a lookup failure as best-effort — logged, response returned unchanged, never a failed request |
 | `updates` | Updates service | Product update levels; returns typed structs (not raw passthrough) |
+| `csmnotification` | `integrations/csm-notification-service` | Health check only today (`Health(ctx)`, backing `GET /health/dependencies` — see "Health endpoints" below). Optional: unconfigured (`CSM_NOTIFICATION_SERVICE_BASE_URL` unset) means this dependency reports `not_configured` |
+| `csmintegration` | `integrations/csm-integration-service` | Same shape and same one purpose as `csmnotification` above, for `integrations/csm-integration-service` |
 
 New upstream services get their own package under `internal/` following the same `Client` + `do()` pattern. `entity` is the exception: because it hosts multiple, separately-deployed/differently-authenticated services, it uses a `<Name>Config`/`<Name>Client` pair per service/file instead of one shared `Client` for the whole package — `CustomerEntityClient`/`EngineeringEntityClient`.
 

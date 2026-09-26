@@ -37,6 +37,32 @@ paths:
         "200":
           description: Ok
 
+  /health/dependencies:
+    get:
+      summary: >-
+        Aggregating dependency health check. Distinct from GET /health (a pure
+        liveness probe): this checks SCIM, Updates, csm-notification-service
+        and csm-integration-service (each optional except SCIM/Updates) and
+        reports Engineering Entity Service as "unknown" (it has no health
+        endpoint of its own). entity-service is not checked here. Do not wire
+        this up as the liveness/restart probe — a downstream blip here must
+        not restart or drain an otherwise-healthy instance.
+      operationId: getHealthDependencies
+      security: []
+      responses:
+        "200":
+          description: Every checked dependency is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthDependenciesResponse'
+        "503":
+          description: At least one dependency is down.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthDependenciesResponse'
+
   /cases:
     post:
       summary: Create a new case.
@@ -9083,6 +9109,30 @@ components:
       properties:
         message:
           type: string
+
+    HealthDependenciesResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        dependencies:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                enum: [scim, updates, csm-notification-service, csm-integration-service, engineering-entity]
+              status:
+                type: string
+                description: >-
+                  "down" only ever means a real check failed; "not_configured"
+                  means this deployment has no base URL for that dependency;
+                  "unknown" (engineering-entity only) means the dependency has
+                  no health endpoint to check at all. No failure detail is
+                  included — this endpoint is unauthenticated and public.
+                enum: [ok, down, not_configured, unknown]
 
     PatchChangeRequestPayload:
       type: object

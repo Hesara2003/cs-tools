@@ -156,6 +156,17 @@ On this path the target must be `repoOverride` and must match an entry of `GITHU
 | `SCIM_BASE_URL` | Base URL of the SCIM operations service |
 | `SCIM_SCOPES` | Comma-separated OAuth2 scopes (optional) |
 
+### csm-notification-service / csm-integration-service (health check only)
+
+Both optional — used only to back `GET /health/dependencies` today (see "Health" under [API Endpoints](#health) above). Unset leaves that dependency reported as `not_configured` rather than failing startup. Uses the shared `OAUTH2_*` credentials above.
+
+| Variable | Description |
+|---|---|
+| `CSM_NOTIFICATION_SERVICE_BASE_URL` | Base URL of `integrations/csm-notification-service`. Optional |
+| `CSM_NOTIFICATION_SERVICE_SCOPES` | Comma-separated OAuth2 scopes (optional) |
+| `CSM_INTEGRATION_SERVICE_BASE_URL` | Base URL of `integrations/csm-integration-service`. Optional |
+| `CSM_INTEGRATION_SERVICE_SCOPES` | Comma-separated OAuth2 scopes (optional) |
+
 ### Notifications — email channel (not yet wired in)
 
 `internal/notifications` (`EmailClient.SendEmail`) is ready to use but is not constructed in `cmd/server/main.go` — no handler calls it yet. These variables are not read by any code today; they're documented here for when the first caller is added, which should reuse the shared `OAUTH2_*` credentials above rather than adding its own. Each notification channel gets its own `NOTIFICATIONS_<CHANNEL>_*` prefix for its channel-specific settings — SMS/Twilio will follow this same convention once added.
@@ -329,6 +340,10 @@ backend/
 │   ├── updates/
 │   │   ├── client.go           # OAuth2 HTTP client for the updates service
 │   │   └── updates.go          # Updates service operations
+│   ├── csmnotification/
+│   │   └── client.go           # OAuth2 HTTP client for csm-notification-service (health check only)
+│   ├── csmintegration/
+│   │   └── client.go           # OAuth2 HTTP client for csm-integration-service (health check only)
 │   ├── middleware/
 │   │   ├── auth.go             # JWT validation; injects UserInfo into context
 │   │   ├── correlation.go      # X-CSM-Correlation-ID propagation + slog enrichment
@@ -347,12 +362,18 @@ backend/
 │       ├── incidents.go                  # HTTP handlers for incident endpoints (ServiceNow only)
 │       ├── problems.go                   # HTTP handlers for problem endpoints (ServiceNow only)
 │       ├── updates.go                    # HTTP handlers for updates endpoints
+│       ├── health.go                     # GET /health/dependencies — aggregating dependency health check
 │       └── users.go                      # HTTP handlers for user endpoints
 ├── .env                        # Local config (git-ignored)
 └── go.mod
 ```
 
 ## API Endpoints
+
+### Health
+
+- `GET /health` — Liveness probe; always `200`, no dependency calls. Wire this up as the restart/drain-triggering probe
+- `GET /health/dependencies` — Aggregating dependency check: SCIM, Updates, csm-notification-service and csm-integration-service (each independently optional except SCIM/Updates), plus Engineering Entity Service reported as `unknown` (it has no health endpoint of its own). entity-service is not checked here. `200` when every checked dependency is `ok`, `503` if any is `down`. Do **not** wire this one up as a liveness/restart probe — see [Configuration](#configuration) and `internal/handler/health.go`'s own doc comment for why the two are kept separate
 
 ### Cases
 

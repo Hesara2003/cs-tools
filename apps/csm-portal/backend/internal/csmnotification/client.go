@@ -14,10 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package scim
+// Package csmnotification is a minimal client for
+// integrations/csm-notification-service, today used only to back the
+// portal's aggregating GET /health/dependencies check. That service's own
+// GET /health has no dependency of its own (a plain 200), so there is
+// nothing else for this client to call yet.
+package csmnotification
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -34,7 +38,7 @@ import (
 // Overridden in tests to keep them fast.
 var tokenFetchTimeout = 10 * time.Second
 
-// Config holds the configuration for the SCIM operations client.
+// Config holds the configuration for the csm-notification-service client.
 type Config struct {
 	BaseURL      string
 	TokenURL     string
@@ -43,15 +47,17 @@ type Config struct {
 	Scopes       []string
 }
 
-// Client is an HTTP client authenticated via the OAuth2 client credentials grant.
-// Tokens are acquired and refreshed automatically; callers need not manage them.
+// Client is an HTTP client authenticated via the OAuth2 client credentials
+// grant. Tokens are acquired and refreshed automatically; callers need not
+// manage them.
 type Client struct {
 	http    *http.Client
 	baseURL string
 }
 
-// NewClient constructs a Client that authenticates against the SCIM operations
-// service using the OAuth2 client credentials grant type.
+// NewClient constructs a Client that authenticates against
+// csm-notification-service using the OAuth2 client credentials grant type —
+// the same shared app every other upstream client in this backend uses.
 func NewClient(cfg Config) *Client {
 	cc := clientcredentials.Config{
 		ClientID:     cfg.ClientID,
@@ -63,7 +69,7 @@ func NewClient(cfg Config) *Client {
 	tokenCtx := context.WithValue(context.Background(), oauth2.HTTPClient,
 		&http.Client{Timeout: tokenFetchTimeout})
 	httpClient := cc.Client(tokenCtx)
-	httpClient.Timeout = 25 * time.Second
+	httpClient.Timeout = 10 * time.Second
 
 	return &Client{
 		http:    httpClient,
@@ -71,49 +77,23 @@ func NewClient(cfg Config) *Client {
 	}
 }
 
-// do executes an authenticated HTTP request against the SCIM service and
-// returns the raw JSON response body. The caller owns the returned slice.
-func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
-	var reqBody io.Reader
-	if len(body) > 0 {
-		reqBody = bytes.NewReader(body)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
+// Health calls csm-notification-service's own health endpoint and returns an
+// error unless it answers 200.
+func (c *Client) Health(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/health", nil)
 	if err != nil {
-		return nil, fmt.Errorf("scim: build request %s %s: %w", method, path, err)
-	}
-	if len(body) > 0 {
-		req.Header.Set("Content-Type", "application/json")
+		return fmt.Errorf("csmnotification: build health request: %w", err)
 	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("scim: %s %s: %w", method, path, err)
+		return fmt.Errorf("csmnotification: health check: %w", err)
 	}
 	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("scim: read response body: %w", err)
-	}
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		const maxErrBody = 256
-		excerpt := respBody
-		if len(excerpt) > maxErrBody {
-			excerpt = excerpt[:maxErrBody]
-		}
-		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(excerpt)}
+		return &apierror.Error{StatusCode: resp.StatusCode}
 	}
-
-	return respBody, nil
-}
-
-// Health calls the SCIM operations service's own health-check endpoint and
-// returns an error unless it answers 200. Used by the portal's aggregating
-// dependency health check, never on the request path.
-func (c *Client) Health(ctx context.Context) error {
-	_, err := c.do(ctx, http.MethodGet, "/health-check", nil)
-	return err
+	return nil
 }

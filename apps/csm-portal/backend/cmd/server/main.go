@@ -33,6 +33,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmintegration"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmnotification"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/directory"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
@@ -85,6 +87,10 @@ func main() {
 	// forwarding to the entity service. It authenticates as the same shared
 	// OAuth2 app as every other upstream; only its base URL and scopes are its
 	// own. Unset keeps the entity-service path exactly as it was.
+	// engineeringEntityConfigured is also read by GET /health/dependencies below —
+	// that service has no health endpoint of its own, so this only changes
+	// which status it's reported under, never whether it's actually called.
+	engineeringEntityConfigured := strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_BASE_URL")) != ""
 	if engineeringBaseURL := strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_BASE_URL")); engineeringBaseURL != "" {
 		engineeringBaseURL = mustHTTPSBaseURL("ENGINEERING_ENTITY_BASE_URL", engineeringBaseURL)
 		caseHandler.WithEngineeringClient(entity.NewEngineeringEntityClient(entity.EngineeringEntityConfig{
@@ -169,6 +175,37 @@ func main() {
 		Scopes:       splitComma(os.Getenv("SCIM_SCOPES")),
 	}
 	scimClient := scim.NewClient(scimCfg)
+
+	// csm-notification-service and csm-integration-service are only used
+	// today to back GET /health/dependencies below — this backend has no
+	// other reason to call either directly (notifications and Event Hub
+	// publishing both live in entity-service/csm-notification-service now,
+	// see this file's own "Upstream service modules" note in CLAUDE.md).
+	// Both base URLs are optional, same as ENGINEERING_ENTITY_BASE_URL above:
+	// an environment that hasn't wired one yet just reports that dependency
+	// as "not_configured" rather than failing startup.
+	var notificationPinger handler.HealthPinger
+	if v := strings.TrimSpace(os.Getenv("CSM_NOTIFICATION_SERVICE_BASE_URL")); v != "" {
+		notificationPinger = csmnotification.NewClient(csmnotification.Config{
+			BaseURL:      v,
+			TokenURL:     oauth2TokenURL,
+			ClientID:     oauth2ClientID,
+			ClientSecret: oauth2ClientSecret,
+			Scopes:       splitComma(os.Getenv("CSM_NOTIFICATION_SERVICE_SCOPES")),
+		})
+	}
+	var integrationPinger handler.HealthPinger
+	if v := strings.TrimSpace(os.Getenv("CSM_INTEGRATION_SERVICE_BASE_URL")); v != "" {
+		integrationPinger = csmintegration.NewClient(csmintegration.Config{
+			BaseURL:      v,
+			TokenURL:     oauth2TokenURL,
+			ClientID:     oauth2ClientID,
+			ClientSecret: oauth2ClientSecret,
+			Scopes:       splitComma(os.Getenv("CSM_INTEGRATION_SERVICE_SCOPES")),
+		})
+	}
+	healthHandler := handler.NewHealthHandler(scimClient, updatesClient, notificationPinger, integrationPinger, engineeringEntityConfigured)
+
 	// One guard authorises every route below and also backs the permissions
 	// GET /users/me reports, so the two cannot drift apart.
 	accessGuard := handler.NewAccessGuard(loadAccessConfig())
@@ -186,8 +223,9 @@ func main() {
 
 	// Every route goes through route(), which takes the permission it needs as
 	// a required argument: there is no default, so a new route cannot be
-	// registered without someone deciding who may call it. /health is the one
-	// exception and is exempt in the Auth middleware too.
+	// registered without someone deciding who may call it. /health and
+	// /health/dependencies are the two exceptions and are exempt in the Auth
+	// middleware too.
 	mux := http.NewServeMux()
 	route := func(pattern string, perm handler.Permission, h http.HandlerFunc) {
 		mux.HandleFunc(pattern, accessGuard.Require(perm, h))
@@ -195,6 +233,10 @@ func main() {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	// GET /health/dependencies is a second, exempt-from-auth probe alongside
+	// GET /health above, not a route requiring a permission — see
+	// HealthHandler's own doc comment for why the two are kept separate.
+	mux.HandleFunc("GET /health/dependencies", healthHandler.GetHealthDependencies)
 	route("POST /cases", handler.PermWrite, caseHandler.CreateCase)
 	route("GET /cases/{id}", handler.PermView, caseHandler.GetCase)
 	route("PATCH /cases/{id}", handler.PermWrite, caseHandler.PatchCase)
