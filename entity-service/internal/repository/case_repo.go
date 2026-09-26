@@ -281,6 +281,21 @@ type CaseRepository interface {
 	// not exist (the tag might exist but not be on this case, or not exist
 	// at all -- both are "not found" from the caller's perspective).
 	RemoveCaseTag(ctx context.Context, caseID, tagID, callerEmail string) error
+	// SetCaseTagSNSysID best-effort persists ServiceNow's own label_entry
+	// sys_id for the (caseID, tagID) attachment on work_item_tag (migration
+	// 000088) -- called from AddCaseTag's async ServiceNow mirror success
+	// path, never from the synchronous request path. Returns
+	// *apierror.NotFoundError if the pairing does not exist (e.g. it was
+	// removed concurrently before the mirror finished), so the caller can
+	// react by cleaning up the ServiceNow tag this call failed to map.
+	SetCaseTagSNSysID(ctx context.Context, caseID, tagID, snSysID string) error
+	// GetCaseTagSNSysID returns the ServiceNow label_entry sys_id previously
+	// stored for the (caseID, tagID) attachment by SetCaseTagSNSysID, or nil
+	// if none is stored yet. Returns a NotFoundError if the pairing does not
+	// exist -- callers that need this before a REMOVE (which deletes the
+	// work_item_tag row entirely, taking sn_sys_id with it) must call this
+	// first, synchronously, while the row still exists.
+	GetCaseTagSNSysID(ctx context.Context, caseID, tagID string) (*string, error)
 	// SearchTags returns tags (not scoped to any case) whose name matches
 	// searchQuery case-insensitively (all tags when searchQuery is empty),
 	// most recently created first, capped at limit. callerEmail is threaded
@@ -2449,6 +2464,41 @@ func (r *caseRepo) RemoveCaseTag(ctx context.Context, caseID, tagID, _ string) e
 		return &apierror.NotFoundError{Msg: "tag not found on this case"}
 	}
 	return nil
+}
+
+// SetCaseTagSNSysID implements CaseRepository. Returns *apierror.NotFoundError
+// if the (caseID, tagID) attachment no longer exists -- e.g. RemoveCaseTag
+// deleted it concurrently, in the gap between AddCaseTag's mirror creating
+// the ServiceNow tag and this call persisting its sys_id back -- so the
+// AddCaseTag writeback callback can react by cleaning up the now-orphaned
+// ServiceNow tag instead of silently discarding its id.
+func (r *caseRepo) SetCaseTagSNSysID(ctx context.Context, caseID, tagID, snSysID string) error {
+	result, err := r.db.Exec(ctx,
+		`UPDATE work_item_tag SET sn_sys_id = $1 WHERE work_item_id = $2 AND tag_id = $3`,
+		snSysID, caseID, tagID)
+	if err != nil {
+		return fmt.Errorf("set case tag sn sys id: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return &apierror.NotFoundError{Msg: "tag not found on this case"}
+	}
+	return nil
+}
+
+// GetCaseTagSNSysID implements CaseRepository.
+func (r *caseRepo) GetCaseTagSNSysID(ctx context.Context, caseID, tagID string) (*string, error) {
+	var snSysID *string
+	err := r.db.QueryRow(ctx,
+		`SELECT sn_sys_id FROM work_item_tag WHERE work_item_id = $1 AND tag_id = $2`,
+		caseID, tagID,
+	).Scan(&snSysID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, &apierror.NotFoundError{Msg: "tag not found on this case"}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get case tag sn sys id: %w", err)
+	}
+	return snSysID, nil
 }
 
 // SearchTags implements CaseRepository.
