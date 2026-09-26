@@ -87,10 +87,8 @@ func main() {
 	// forwarding to the entity service. It authenticates as the same shared
 	// OAuth2 app as every other upstream; only its base URL and scopes are its
 	// own. Unset keeps the entity-service path exactly as it was.
-	// engineeringEntityConfigured is also read by GET /health/dependencies below —
-	// that service has no health endpoint of its own, so this only changes
-	// which status it's reported under, never whether it's actually called.
-	engineeringEntityConfigured := strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_BASE_URL")) != ""
+	// Not checked by GET /health/dependencies below: it has no health endpoint
+	// of its own anywhere in its repo, so there is nothing to call.
 	if engineeringBaseURL := strings.TrimSpace(os.Getenv("ENGINEERING_ENTITY_BASE_URL")); engineeringBaseURL != "" {
 		engineeringBaseURL = mustHTTPSBaseURL("ENGINEERING_ENTITY_BASE_URL", engineeringBaseURL)
 		caseHandler.WithEngineeringClient(entity.NewEngineeringEntityClient(entity.EngineeringEntityConfig{
@@ -204,7 +202,7 @@ func main() {
 			Scopes:       splitComma(os.Getenv("CSM_INTEGRATION_SERVICE_SCOPES")),
 		})
 	}
-	healthHandler := handler.NewHealthHandler(scimClient, updatesClient, notificationPinger, integrationPinger, engineeringEntityConfigured)
+	healthHandler := handler.NewHealthHandler(scimClient, updatesClient, notificationPinger, integrationPinger)
 
 	// One guard authorises every route below and also backs the permissions
 	// GET /users/me reports, so the two cannot drift apart.

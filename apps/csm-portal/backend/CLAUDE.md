@@ -79,16 +79,17 @@ already established for its own `/health` vs `/health/database`:
 - **`GET /health`** — pure liveness, always `200`, zero dependency calls. This is the one Choreo (or
   whatever orchestrator) should wire up as the restart/drain-triggering probe.
 - **`GET /health/dependencies`** (`internal/handler/health.go`) — aggregates this backend's own
-  upstream integrations: SCIM, Updates, `csm-notification-service`, `csm-integration-service`, and
-  Engineering Entity Service. `entity-service` is deliberately excluded (this backend depends on it
-  for nearly every request; checking it here was an explicit product decision to leave out). Each
-  dependency reports one of `ok`/`down`/`not_configured`/`unknown` — `not_configured` for
-  `csm-notification-service`/`csm-integration-service` when their base URL env var is unset (both
-  optional, same posture as `ENGINEERING_ENTITY_BASE_URL`), `unknown` for Engineering Entity Service
-  always, since it has no health endpoint of its own to call regardless of whether it's configured.
-  Checks run concurrently, each bounded by its own 5s timeout so one slow upstream can't hang the
-  whole response. Overall `status` is `degraded` (HTTP `503`) if any dependency is `down`;
-  `not_configured`/`unknown` never count as a failure on their own. **Never wire this one up as a
+  upstream integrations: SCIM, Updates, `csm-notification-service`, `csm-integration-service`.
+  `entity-service` is deliberately excluded (this backend depends on it for nearly every request;
+  checking it here was an explicit product decision to leave out). Engineering Entity Service is
+  also not listed here at all — it has no health endpoint of its own anywhere in its repo today, so
+  there is nothing to call; add it back once `digiops-engineering` exposes one (see that repo's own
+  entity-service branch). Each listed dependency reports one of `ok`/`down`/`not_configured` —
+  `not_configured` for `csm-notification-service`/`csm-integration-service` when their base URL env
+  var is unset (both optional, same posture as `ENGINEERING_ENTITY_BASE_URL`). Checks run
+  concurrently, each bounded by its own 5s timeout so one slow upstream can't hang the whole
+  response. Overall `status` is `degraded` (HTTP `503`) if any dependency is `down`;
+  `not_configured` never counts as a failure on its own. **Never wire this one up as a
   liveness/restart probe** — a brief SCIM or Updates outage failing this endpoint must not have the
   orchestrator restart or drain an otherwise-healthy instance of this backend, the same reasoning
   entity-service's own `/health` vs `/health/database` split documents. The response body carries no

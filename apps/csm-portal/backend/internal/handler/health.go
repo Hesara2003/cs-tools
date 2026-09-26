@@ -40,7 +40,6 @@ const (
 	dependencyStatusOK            = "ok"
 	dependencyStatusDown          = "down"
 	dependencyStatusNotConfigured = "not_configured"
-	dependencyStatusUnknown       = "unknown"
 )
 
 // DependencyHealth is one entry of HealthDependenciesResponse. It carries no
@@ -70,34 +69,28 @@ type HealthDependenciesResponse struct {
 //
 // entity-service is deliberately not checked here — this backend depends on
 // it for nearly every request, and checking it is out of scope for this
-// aggregation by explicit product decision. Engineering Entity Service has
-// no health endpoint of its own at all today, so it is reported as
-// "unknown" rather than silently skipped or assumed healthy.
+// aggregation by explicit product decision. Engineering Entity Service is
+// also not checked, and not listed at all: it has no health endpoint of its
+// own anywhere in its repo, so there's nothing here to call — reporting a
+// fixed "unknown" for it was tried first and dropped as noise, since it can
+// never be anything else until that service adds one.
 type HealthHandler struct {
 	scim         HealthPinger
 	updates      HealthPinger
 	notification HealthPinger // nil when CSM_NOTIFICATION_SERVICE_BASE_URL is unset
 	integration  HealthPinger // nil when CSM_INTEGRATION_SERVICE_BASE_URL is unset
-
-	// engineeringEntityConfigured records only whether ENGINEERING_ENTITY_BASE_URL
-	// is set. There is no health endpoint to call either way (see the type's
-	// own doc comment above), so this never gates an actual network call —
-	// it only changes the reported status between "not_configured" and
-	// "unknown".
-	engineeringEntityConfigured bool
 }
 
 // NewHealthHandler constructs a HealthHandler. notification/integration may
 // be nil (pass an untyped nil, never a nil-valued concrete pointer — see
 // entity-service's own CLAUDE.md for why a typed nil boxed into an interface
 // is a common bug here) when that service's base URL is not configured.
-func NewHealthHandler(scim, updates, notification, integration HealthPinger, engineeringEntityConfigured bool) *HealthHandler {
+func NewHealthHandler(scim, updates, notification, integration HealthPinger) *HealthHandler {
 	return &HealthHandler{
-		scim:                        scim,
-		updates:                     updates,
-		notification:                notification,
-		integration:                 integration,
-		engineeringEntityConfigured: engineeringEntityConfigured,
+		scim:         scim,
+		updates:      updates,
+		notification: notification,
+		integration:  integration,
 	}
 }
 
@@ -117,7 +110,7 @@ func (h *HealthHandler) GetHealthDependencies(w http.ResponseWriter, r *http.Req
 		{"csm-integration-service", h.integration},
 	}
 
-	deps := make([]DependencyHealth, len(checks)+1)
+	deps := make([]DependencyHealth, len(checks))
 	var wg sync.WaitGroup
 	for i, c := range checks {
 		wg.Add(1)
@@ -127,12 +120,6 @@ func (h *HealthHandler) GetHealthDependencies(w http.ResponseWriter, r *http.Req
 		}(i, c.name, c.pinger)
 	}
 	wg.Wait()
-
-	engineeringStatus := dependencyStatusNotConfigured
-	if h.engineeringEntityConfigured {
-		engineeringStatus = dependencyStatusUnknown
-	}
-	deps[len(checks)] = DependencyHealth{Name: "engineering-entity", Status: engineeringStatus}
 
 	overall := dependencyStatusOK
 	statusCode := http.StatusOK

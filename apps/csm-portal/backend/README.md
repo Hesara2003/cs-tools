@@ -373,7 +373,7 @@ backend/
 ### Health
 
 - `GET /health` — Liveness probe; always `200`, no dependency calls. Wire this up as the restart/drain-triggering probe
-- `GET /health/dependencies` — Aggregating dependency check: SCIM, Updates, csm-notification-service and csm-integration-service (each independently optional except SCIM/Updates), plus Engineering Entity Service reported as `unknown` (it has no health endpoint of its own). entity-service is not checked here. `200` when every checked dependency is `ok`, `503` if any is `down`. Do **not** wire this one up as a liveness/restart probe — see [Configuration](#configuration) and `internal/handler/health.go`'s own doc comment for why the two are kept separate
+- `GET /health/dependencies` — Aggregating dependency check: SCIM, Updates, csm-notification-service and csm-integration-service (each independently optional except SCIM/Updates). entity-service is not checked here, and neither is Engineering Entity Service — it has no health endpoint of its own anywhere in its repo yet. `200` when every checked dependency is `ok`, `503` if any is `down`. Do **not** wire this one up as a liveness/restart probe — see [Configuration](#configuration) and `internal/handler/health.go`'s own doc comment for why the two are kept separate
 
 ### Cases
 

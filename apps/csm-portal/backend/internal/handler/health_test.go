@@ -33,7 +33,7 @@ func (f fakePinger) Health(ctx context.Context) error {
 }
 
 func TestHealthHandler_GetHealthDependencies_AllHealthy(t *testing.T) {
-	h := NewHealthHandler(fakePinger{}, fakePinger{}, fakePinger{}, fakePinger{}, true)
+	h := NewHealthHandler(fakePinger{}, fakePinger{}, fakePinger{}, fakePinger{})
 
 	w := httptest.NewRecorder()
 	h.GetHealthDependencies(w, httptest.NewRequest(http.MethodGet, "/health/dependencies", nil))
@@ -43,15 +43,12 @@ func TestHealthHandler_GetHealthDependencies_AllHealthy(t *testing.T) {
 	if resp.Status != "ok" {
 		t.Errorf("Status = %q, want ok", resp.Status)
 	}
-	if len(resp.Dependencies) != 5 {
-		t.Fatalf("len(Dependencies) = %d, want 5", len(resp.Dependencies))
+	if len(resp.Dependencies) != 4 {
+		t.Fatalf("len(Dependencies) = %d, want 4", len(resp.Dependencies))
 	}
 	for _, d := range resp.Dependencies {
 		if d.Name == "engineering-entity" {
-			if d.Status != "unknown" {
-				t.Errorf("engineering-entity status = %q, want unknown", d.Status)
-			}
-			continue
+			t.Error("engineering-entity must not appear — it has no health endpoint to check")
 		}
 		if d.Status != "ok" {
 			t.Errorf("%s status = %q, want ok", d.Name, d.Status)
@@ -60,7 +57,7 @@ func TestHealthHandler_GetHealthDependencies_AllHealthy(t *testing.T) {
 }
 
 func TestHealthHandler_GetHealthDependencies_OneDown(t *testing.T) {
-	h := NewHealthHandler(fakePinger{}, fakePinger{err: errors.New("boom")}, fakePinger{}, fakePinger{}, false)
+	h := NewHealthHandler(fakePinger{}, fakePinger{err: errors.New("boom")}, fakePinger{}, fakePinger{})
 
 	w := httptest.NewRecorder()
 	h.GetHealthDependencies(w, httptest.NewRequest(http.MethodGet, "/health/dependencies", nil))
@@ -70,20 +67,14 @@ func TestHealthHandler_GetHealthDependencies_OneDown(t *testing.T) {
 	if resp.Status != "degraded" {
 		t.Errorf("Status = %q, want degraded", resp.Status)
 	}
-	var sawUpdatesDown, sawEngineeringNotConfigured bool
+	var sawUpdatesDown bool
 	for _, d := range resp.Dependencies {
 		if d.Name == "updates" && d.Status == "down" {
 			sawUpdatesDown = true
 		}
-		if d.Name == "engineering-entity" && d.Status == "not_configured" {
-			sawEngineeringNotConfigured = true
-		}
 	}
 	if !sawUpdatesDown {
 		t.Error("expected updates to be reported down")
-	}
-	if !sawEngineeringNotConfigured {
-		t.Error("expected engineering-entity to be reported not_configured")
 	}
 }
 
@@ -91,7 +82,7 @@ func TestHealthHandler_GetHealthDependencies_NotConfiguredIsNotDown(t *testing.T
 	// notification/integration nil (unconfigured) must never drag the
 	// overall status into "degraded" — that's a deployment choice, not a
 	// dependency failure.
-	h := NewHealthHandler(fakePinger{}, fakePinger{}, nil, nil, false)
+	h := NewHealthHandler(fakePinger{}, fakePinger{}, nil, nil)
 
 	w := httptest.NewRecorder()
 	h.GetHealthDependencies(w, httptest.NewRequest(http.MethodGet, "/health/dependencies", nil))
