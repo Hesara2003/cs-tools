@@ -1597,6 +1597,12 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 	if err := validateUUIDs("projectId", parsed.ExcludeProjectIDs); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
+	if err := validateUUIDs("creTeam", parsed.CreTeamIDs); err != nil {
+		return domain.SearchCasesResponse{}, err
+	}
+	if err := validateUUIDs("sreTeam", parsed.SreTeamIDs); err != nil {
+		return domain.SearchCasesResponse{}, err
+	}
 	if parsed.ParentID != nil {
 		if err := validateUUIDs("parentId", []string{*parsed.ParentID}); err != nil {
 			return domain.SearchCasesResponse{}, err
@@ -1651,11 +1657,13 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: `field "resolvedOn" is not supported by this data source`}
 	}
 
-	// These fields dot-walk into ServiceNow-specific concepts (product family,
-	// project type, integration-CS/SRE team, etc.) that caseRepo.SearchCases has
-	// no query for today. Reject rather than silently drop the predicate and
-	// widen the result set. (tag, projectOnboardingStatus and
-	// taskSLABusinessElapsedPercent are implemented there, so are absent here.)
+	// projectType dot-walks into a ServiceNow-specific concept that
+	// caseRepo.SearchCases has no query for today. Reject rather than
+	// silently drop the predicate and widen the result set. (tag,
+	// projectOnboardingStatus and taskSLABusinessElapsedPercent are
+	// implemented there, so are absent here; product and creTeam/sreTeam
+	// used to be too, but the repository already joins account and "group" --
+	// see caseFieldPredicates/the SearchCases joins block.)
 	// state+in is supported here; state+notIn has no repository query support,
 	// and dropping an exclusion silently would widen the result set.
 	// parentId is also implemented (wi.parent_id, migration 000036 -- the
@@ -1663,17 +1671,8 @@ func (s *caseService) SearchCases(ctx context.Context, req domain.SearchCasesReq
 	if len(parsed.ExcludeStates) > 0 {
 		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: `field "state" (notIn) is not supported by this data source`}
 	}
-	if len(parsed.ProductNames) > 0 {
-		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: `field "product" is not supported by this data source`}
-	}
 	if len(parsed.ProjectTypeNames) > 0 {
 		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: `field "projectType" is not supported by this data source`}
-	}
-	if len(parsed.CreTeamIDs) > 0 {
-		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: `field "creTeam" is not supported by this data source`}
-	}
-	if len(parsed.SreTeamIDs) > 0 {
-		return domain.SearchCasesResponse{}, &apierror.ValidationError{Msg: `field "sreTeam" is not supported by this data source`}
 	}
 	// accountId+in has no repository query support today either (see
 	// domain.ParsedCaseFilters.AccountIDs); accountId+notIn is rejected the
