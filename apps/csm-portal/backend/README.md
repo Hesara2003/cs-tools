@@ -133,7 +133,7 @@ Backs `entity.CustomerEntityClient` (this repo's entity-service; cases, accounts
 
 ### Engineering entity service (optional)
 
-Backs `entity.EngineeringEntityClient.CreateGitIssue` (a separate internal engineering entity service). When `ENGINEERING_ENTITY_BASE_URL` is set, `POST /cases/{id}/github-issues` files the issue through it instead of forwarding to the entity service; unset, that endpoint behaves exactly as before. It uses the same shared OAuth2 credentials above (`OAUTH2_CLIENT_ID`/`_CLIENT_SECRET`/`_TOKEN_URL`) — only its base URL and scopes are its own.
+Backs `entity.EngineeringEntityClient.CreateGitIssue` (a separate internal engineering entity service). When `ENGINEERING_ENTITY_BASE_URL` is set, `POST /cases/{id}/github-issues` files the issue through it instead of forwarding to the entity service; unset, that endpoint behaves exactly as before. It uses the same shared OAuth2 credentials above (`OAUTH2_CLIENT_ID`/`_CLIENT_SECRET`/`_TOKEN_URL`) — only its base URL and scopes are its own. The same configuration also backs its `GET /health/dependencies` check (see [Health](#health) above); unset, that dependency reports `not_configured` there too.
 
 | Variable | Description |
 |---|---|
@@ -155,6 +155,17 @@ On this path the target must be `repoOverride` and must match an entry of `GITHU
 |---|---|
 | `SCIM_BASE_URL` | Base URL of the SCIM operations service |
 | `SCIM_SCOPES` | Comma-separated OAuth2 scopes (optional) |
+
+### csm-notification-service / csm-integration-service (health check only)
+
+Both optional — used only to back `GET /health/dependencies` today (see "Health" under [API Endpoints](#health) above). Unset leaves that dependency reported as `not_configured` rather than failing startup. Uses the shared `OAUTH2_*` credentials above.
+
+| Variable | Description |
+|---|---|
+| `CSM_NOTIFICATION_SERVICE_BASE_URL` | Base URL of `integrations/csm-notification-service`. Optional |
+| `CSM_NOTIFICATION_SERVICE_SCOPES` | Comma-separated OAuth2 scopes (optional) |
+| `CSM_INTEGRATION_SERVICE_BASE_URL` | Base URL of `integrations/csm-integration-service`. Optional |
+| `CSM_INTEGRATION_SERVICE_SCOPES` | Comma-separated OAuth2 scopes (optional) |
 
 ### Notifications — email channel (not yet wired in)
 
@@ -329,6 +340,10 @@ backend/
 │   ├── updates/
 │   │   ├── client.go           # OAuth2 HTTP client for the updates service
 │   │   └── updates.go          # Updates service operations
+│   ├── csmnotification/
+│   │   └── client.go           # OAuth2 HTTP client for csm-notification-service (health check only)
+│   ├── csmintegration/
+│   │   └── client.go           # OAuth2 HTTP client for csm-integration-service (health check only)
 │   ├── middleware/
 │   │   ├── auth.go             # JWT validation; injects UserInfo into context
 │   │   ├── correlation.go      # X-CSM-Correlation-ID propagation + slog enrichment
@@ -347,12 +362,18 @@ backend/
 │       ├── incidents.go                  # HTTP handlers for incident endpoints (ServiceNow only)
 │       ├── problems.go                   # HTTP handlers for problem endpoints (ServiceNow only)
 │       ├── updates.go                    # HTTP handlers for updates endpoints
+│       ├── health.go                     # GET /health/dependencies — aggregating dependency health check
 │       └── users.go                      # HTTP handlers for user endpoints
 ├── .env                        # Local config (git-ignored)
 └── go.mod
 ```
 
 ## API Endpoints
+
+### Health
+
+- `GET /health` — Liveness probe; always `200`, no dependency calls. Wire this up as the restart/drain-triggering probe
+- `GET /health/dependencies` — Aggregating dependency check: SCIM Service, Updates Service, CSM Notification Service, CSM Integration Service and Engineering Entity Service (each independently optional except SCIM/Updates). This backend's own core entity-service is not checked here. `200` when every checked dependency is `ok`, `503` if any is `down`. Do **not** wire this one up as a liveness/restart probe — see [Configuration](#configuration) and `internal/handler/health.go`'s own doc comment for why the two are kept separate
 
 ### Cases
 

@@ -37,6 +37,38 @@ paths:
         "200":
           description: Ok
 
+  /health/dependencies:
+    get:
+      summary: >-
+        Aggregating dependency health check. Distinct from GET /health (a pure
+        liveness probe): this checks SCIM Service, Updates Service, CSM
+        Notification Service, CSM Integration Service and Engineering Entity
+        Service (each optional except SCIM/Updates). This backend's own core
+        entity-service is not checked here. Do not wire this up as the
+        liveness/restart probe — a downstream blip here must not restart or
+        drain an otherwise-healthy instance.
+      operationId: getHealthDependencies
+      security: []
+      responses:
+        "200":
+          description: Every checked dependency is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthDependenciesResponse'
+        "503":
+          description: At least one dependency is down.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthDependenciesResponse'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /cases:
     post:
       summary: Create a new case.
@@ -9083,6 +9115,32 @@ components:
       properties:
         message:
           type: string
+
+    HealthDependenciesResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        dependencies:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                enum: [SCIM Service, Updates Service, CSM Notification Service, CSM Integration Service, Engineering Entity Service]
+              status:
+                type: string
+                description: >-
+                  "down" only ever means a real check failed; "not_configured"
+                  means this deployment has no base URL for that dependency
+                  (SCIM/Updates are always configured, so only see "ok"/"down").
+                  No failure detail is included — this endpoint is
+                  unauthenticated and public. This backend's own core
+                  entity-service is never listed here — see this path's own
+                  summary for why.
+                enum: [ok, down, not_configured]
 
     PatchChangeRequestPayload:
       type: object
