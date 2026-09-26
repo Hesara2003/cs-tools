@@ -21,7 +21,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type fakePinger struct {
@@ -30,6 +32,18 @@ type fakePinger struct {
 
 func (f fakePinger) Health(ctx context.Context) error {
 	return f.err
+}
+
+// countingPinger records how many times Health was actually called, so tests
+// can assert on whether GetHealthDependencies's TTL cache/collapsing
+// suppressed a would-be upstream call.
+type countingPinger struct {
+	calls *int32
+}
+
+func (p countingPinger) Health(ctx context.Context) error {
+	atomic.AddInt32(p.calls, 1)
+	return nil
 }
 
 func TestHealthHandler_GetHealthDependencies_AllHealthy(t *testing.T) {
@@ -96,5 +110,34 @@ func TestHealthHandler_GetHealthDependencies_NotConfiguredIsNotDown(t *testing.T
 				t.Errorf("%s status = %q, want not_configured", d.Name, d.Status)
 			}
 		}
+	}
+}
+
+func TestHealthHandler_GetHealthDependencies_CachesWithinTTL(t *testing.T) {
+	var calls int32
+	pinger := countingPinger{calls: &calls}
+	h := NewHealthHandler(pinger, pinger, pinger, pinger, pinger)
+
+	fakeNow := time.Now()
+	restore := healthNow
+	healthNow = func() time.Time { return fakeNow }
+	defer func() { healthNow = restore }()
+
+	for i := 0; i < 5; i++ {
+		w := httptest.NewRecorder()
+		h.GetHealthDependencies(w, httptest.NewRequest(http.MethodGet, "/health/dependencies", nil))
+		assertStatus(t, w, http.StatusOK)
+	}
+	if got := atomic.LoadInt32(&calls); got != 5 {
+		t.Errorf("Health calls after 5 requests within the TTL = %d, want 5 (one fan-out of 5 dependencies, cached for the rest)", got)
+	}
+
+	// Once the TTL has elapsed, the next request must recompute.
+	fakeNow = fakeNow.Add(dependencyHealthCacheTTL)
+	w := httptest.NewRecorder()
+	h.GetHealthDependencies(w, httptest.NewRequest(http.MethodGet, "/health/dependencies", nil))
+	assertStatus(t, w, http.StatusOK)
+	if got := atomic.LoadInt32(&calls); got != 10 {
+		t.Errorf("Health calls after the TTL elapsed = %d, want 10 (a second fan-out of 5)", got)
 	}
 }

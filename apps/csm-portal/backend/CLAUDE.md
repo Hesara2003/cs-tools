@@ -97,7 +97,16 @@ already established for its own `/health` vs `/health/database`:
   entity-service's own `/health` vs `/health/database` split documents. The response body carries no
   failure detail (no error message, no upstream status code) since this route is unauthenticated and
   public, mirroring entity-service's own explicit "failure bodies carry no detail" convention for the
-  same reason.
+  same reason. **The result is cached for `dependencyHealthCacheTTL` (10s)**, and a cache-miss
+  recomputation holds `HealthHandler.mu` for its full duration rather than just the read/write of the
+  cached fields — a request that arrives mid-recomputation blocks on that same mutex instead of
+  starting its own concurrent fan-out, collapsing every request within one TTL window onto a single
+  set of upstream calls (the same effect `golang.org/x/sync/singleflight` would give, without adding
+  it as a dependency for one call site). This exists because the route has no auth check: without it,
+  an unauthenticated caller repeating the request could trigger unbounded concurrent calls to every
+  configured upstream on every hit. The recomputation runs against `context.Background()`, not the
+  triggering request's own context, since it may be serving several other callers besides the one
+  that started it — a client disconnect must not cancel a check every queued caller is waiting on.
 
 ## Upstream service modules
 

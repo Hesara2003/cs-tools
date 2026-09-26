@@ -186,6 +186,7 @@ func main() {
 	// as "not_configured" rather than failing startup.
 	var notificationPinger handler.HealthPinger
 	if v := strings.TrimSpace(os.Getenv("CSM_NOTIFICATION_SERVICE_BASE_URL")); v != "" {
+		v = mustHTTPSBaseURL("CSM_NOTIFICATION_SERVICE_BASE_URL", v)
 		notificationPinger = csmnotification.NewClient(csmnotification.Config{
 			BaseURL:      v,
 			TokenURL:     oauth2TokenURL,
@@ -196,6 +197,7 @@ func main() {
 	}
 	var integrationPinger handler.HealthPinger
 	if v := strings.TrimSpace(os.Getenv("CSM_INTEGRATION_SERVICE_BASE_URL")); v != "" {
+		v = mustHTTPSBaseURL("CSM_INTEGRATION_SERVICE_BASE_URL", v)
 		integrationPinger = csmintegration.NewClient(csmintegration.Config{
 			BaseURL:      v,
 			TokenURL:     oauth2TokenURL,

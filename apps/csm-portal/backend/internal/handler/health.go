@@ -35,6 +35,21 @@ type HealthPinger interface {
 // slow or hanging upstream cannot make the whole aggregation hang.
 const dependencyHealthCheckTimeout = 5 * time.Second
 
+// dependencyHealthCacheTTL bounds how often GetHealthDependencies actually
+// fans out to upstream dependencies. This route is unauthenticated and
+// public (see HealthHandler's own doc comment), so an unauthenticated caller
+// repeating the request could otherwise trigger unbounded concurrent
+// upstream calls on every hit. Caching the result for a short window, and
+// collapsing any request that arrives while a check is already in flight
+// (see GetHealthDependencies below), bounds that to at most one fan-out per
+// TTL window regardless of request volume.
+const dependencyHealthCacheTTL = 10 * time.Second
+
+// healthNow is time.Now, indirected so tests can fake the passage of time
+// without a real sleep — same override-for-tests convention as
+// csmnotification/csmintegration/scim/updates' own tokenFetchTimeout.
+var healthNow = time.Now
+
 // Dependency health status vocabulary for HealthDependenciesResponse.
 const (
 	dependencyStatusOK            = "ok"
@@ -77,6 +92,19 @@ type HealthHandler struct {
 	notification HealthPinger // nil when CSM_NOTIFICATION_SERVICE_BASE_URL is unset
 	integration  HealthPinger // nil when CSM_INTEGRATION_SERVICE_BASE_URL is unset
 	engineering  HealthPinger // nil when ENGINEERING_ENTITY_BASE_URL is unset
+
+	// mu guards the cached result below and is held for the full duration of
+	// a cache-miss recomputation, not just the read/write of the cached
+	// fields. That is deliberate, not an oversight: a request that arrives
+	// while another is already recomputing blocks on this same mutex rather
+	// than starting its own concurrent fan-out, so concurrent callers within
+	// one TTL window collapse onto a single set of upstream calls (the same
+	// effect a singleflight.Group gives, without adding that dependency for
+	// one call site).
+	mu               sync.Mutex
+	cachedResponse   HealthDependenciesResponse
+	cachedStatusCode int
+	cachedAt         time.Time
 }
 
 // NewHealthHandler constructs a HealthHandler. Any of notification/
@@ -94,12 +122,34 @@ func NewHealthHandler(scim, updates, notification, integration, engineering Heal
 	}
 }
 
-// GetHealthDependencies checks every configured dependency concurrently and
-// reports 200 when all are ok, 503 when any is down. No auth check — this
-// route is registered directly on the mux and is exempt from the Auth
-// middleware, the same way GET /health is (see cmd/server/main.go and
-// internal/middleware/auth.go).
+// GetHealthDependencies serves the cached result when it's younger than
+// dependencyHealthCacheTTL, else recomputes it (see HealthHandler.mu's own
+// doc comment for why recomputation holds the lock for its full duration).
+// Reports 200 when every dependency is ok, 503 when any is down. No auth
+// check — this route is registered directly on the mux and is exempt from
+// the Auth middleware, the same way GET /health is (see cmd/server/main.go
+// and internal/middleware/auth.go).
 func (h *HealthHandler) GetHealthDependencies(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	if healthNow().Sub(h.cachedAt) >= dependencyHealthCacheTTL {
+		// context.Background(), not r.Context(): this computation is shared
+		// with every other request that queues behind h.mu while it runs, so
+		// it must not be cancelled just because the request that happened to
+		// trigger it disconnected. Each individual check still has its own
+		// bounded timeout via checkDependency.
+		h.cachedResponse, h.cachedStatusCode = computeHealthDependencies(context.Background(), h)
+		h.cachedAt = healthNow()
+	}
+	resp, statusCode := h.cachedResponse, h.cachedStatusCode
+	h.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(statusCode)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func computeHealthDependencies(ctx context.Context, h *HealthHandler) (HealthDependenciesResponse, int) {
 	checks := []struct {
 		name   string
 		pinger HealthPinger
@@ -117,7 +167,7 @@ func (h *HealthHandler) GetHealthDependencies(w http.ResponseWriter, r *http.Req
 		wg.Add(1)
 		go func(i int, name string, pinger HealthPinger) {
 			defer wg.Done()
-			deps[i] = checkDependency(r.Context(), name, pinger)
+			deps[i] = checkDependency(ctx, name, pinger)
 		}(i, c.name, c.pinger)
 	}
 	wg.Wait()
@@ -131,11 +181,7 @@ func (h *HealthHandler) GetHealthDependencies(w http.ResponseWriter, r *http.Req
 			break
 		}
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(HealthDependenciesResponse{Status: overall, Dependencies: deps})
+	return HealthDependenciesResponse{Status: overall, Dependencies: deps}, statusCode
 }
 
 func checkDependency(ctx context.Context, name string, pinger HealthPinger) DependencyHealth {

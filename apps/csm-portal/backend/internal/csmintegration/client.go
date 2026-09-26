@@ -35,8 +35,11 @@ import (
 )
 
 // tokenFetchTimeout is the HTTP client timeout for token-endpoint requests.
-// Overridden in tests to keep them fast.
-var tokenFetchTimeout = 10 * time.Second
+// Kept within handler.dependencyHealthCheckTimeout (5s) — Health is this
+// client's only method, called under that per-dependency budget, and a cold
+// or expired token would otherwise be able to acquire a fresh one past that
+// deadline. Overridden in tests to keep them fast.
+var tokenFetchTimeout = 5 * time.Second
 
 // Config holds the configuration for the csm-integration-service client.
 type Config struct {
