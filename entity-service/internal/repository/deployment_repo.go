@@ -26,7 +26,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// DeploymentRepository defines the persistence operations for the deployments table.
+// DeploymentRepository defines the persistence operations for the
+// deployment table (migration 0018).
 type DeploymentRepository interface {
 	// SearchDeployments returns a filtered, paginated slice of enriched deployment
 	// views together with the total count of matching rows before pagination.
@@ -44,11 +45,28 @@ func NewDeploymentRepository(db *pgxpool.Pool) DeploymentRepository {
 }
 
 // SearchDeployments implements DeploymentRepository.
+//
+// This previously queried the plural, unquoted table names (deployments,
+// users, projects) and created_at/updated_at columns -- none of which exist
+// in the real schema (migrations/ has always used the singular, quoted
+// "deployment"/"user"/"project" with created_on/updated_on), so every call
+// to this method failed outright against the live database rather than
+// returning wrong or empty results. Fixed to match the real schema, the
+// same class of fix already documented in this file's own package history
+// for case_repo.go/project_repo.go/etc ("Fixing the plural/singular
+// table-name mismatch").
 func (r *deploymentRepo) SearchDeployments(ctx context.Context, req domain.SearchDeploymentsRequest) ([]domain.DeploymentView, int, error) {
 	filterArgs := []any{}
 	argIdx := 1
 
-	where := "WHERE 1=1"
+	// deployment.project_id is nullable (migration 0018 sets it NULL when
+	// the owning project is deleted). The data query below inner-joins
+	// project and so can never return such a row; without this predicate
+	// the count query would still include it, inflating total relative to
+	// what's actually returned. is_active = TRUE: "deleting" a deployment
+	// deactivates it, it is never actually removed, so a deactivated
+	// deployment must simply stop appearing here, permanently.
+	where := "WHERE d.project_id IS NOT NULL AND d.is_active = TRUE"
 
 	if len(req.ProjectIDs) > 0 {
 		// Cast the parameter to uuid[] so the column stays uncast and idx_deployments_project_id is usable.
@@ -77,18 +95,31 @@ func (r *deploymentRepo) SearchDeployments(ctx context.Context, req domain.Searc
 		argIdx++
 	}
 
-	countQuery := "SELECT COUNT(*) FROM deployments d " + where
+	countQuery := "SELECT COUNT(*) FROM deployment d " + where
 
+	// deployment.created_by is a plain VARCHAR audit string (an email), never
+	// a UUID FK into "user" -- resolved by email, LEFT JOIN so a deployment
+	// created by an unrecognized identity still returns a row (CreatedBy
+	// comes back nil rather than a fabricated EntityRef with an empty id).
+	//
+	// deployedProductCount was previously never selected at all, so it stayed
+	// at its Go zero value on every row -- the customer portal's Usage
+	// Metrics page filters its deployment tabs on productCount > 0, so every
+	// deployment silently looked like it had zero products regardless of how
+	// many deployed_product rows actually existed under it. A correlated
+	// subquery, not a JOIN + GROUP BY, since every other column here is
+	// per-deployment and a join would multiply rows.
 	dataQuery := fmt.Sprintf(
 		`SELECT d.id, d.number, d.name, d.type::TEXT, d.description,
-		        d.created_at, d.updated_at,
-		        u.id, u.first_name || ' ' || u.last_name,
-		        p.id, p.name
-		 FROM deployments d
-		 JOIN users u    ON d.created_by  = u.id
-		 JOIN projects p ON d.project_id  = p.id
+		        d.created_on, d.updated_on,
+		        u.id, COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), '')),
+		        p.id, p.name,
+		        (SELECT COUNT(*) FROM deployed_product dp WHERE dp.deployment_id = d.id)
+		 FROM deployment d
+		 LEFT JOIN "user" u ON LOWER(u.email) = LOWER(d.created_by)
+		 JOIN project p ON d.project_id = p.id
 		 %s
-		 ORDER BY d.created_at DESC, d.id
+		 ORDER BY d.created_on DESC, d.id
 		 LIMIT $%d OFFSET $%d`,
 		where, argIdx, argIdx+1,
 	)
@@ -116,14 +147,31 @@ func (r *deploymentRepo) SearchDeployments(ctx context.Context, req domain.Searc
 		result := make([]domain.DeploymentView, 0, req.Pagination.Limit)
 		for rows.Next() {
 			var d domain.DeploymentView
-			d.CreatedBy = &domain.EntityRef{}
+			var deploymentType *string
+			var creatorID, creatorName *string
 			if err := rows.Scan(
-				&d.ID, &d.Number, &d.Name, &d.Type, &d.Description,
+				&d.ID, &d.Number, &d.Name, &deploymentType, &d.Description,
 				&d.CreatedOn, &d.UpdatedOn,
-				&d.CreatedBy.ID, &d.CreatedBy.Name,
+				&creatorID, &creatorName,
 				&d.Project.ID, &d.Project.Name,
+				&d.DeployedProductCount,
 			); err != nil {
 				return fmt.Errorf("scan deployment: %w", err)
+			}
+			// deployment_type_enum's Postgres labels are UPPER_SNAKE
+			// ("STAGING"), but domain.DeploymentType's canonical form is
+			// lowercase.
+			typeStr := ""
+			if deploymentType != nil {
+				typeStr = *deploymentType
+			}
+			d.Type = domain.DeploymentType(strings.ToLower(typeStr))
+			if creatorID != nil {
+				name := ""
+				if creatorName != nil {
+					name = *creatorName
+				}
+				d.CreatedBy = &domain.EntityRef{ID: *creatorID, Name: name}
 			}
 			result = append(result, d)
 		}
