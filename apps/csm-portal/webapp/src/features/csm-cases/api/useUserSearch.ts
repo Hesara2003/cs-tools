@@ -128,12 +128,21 @@ export function useInfiniteUserSearch(
   // required here — `POST /users/search` doesn't guarantee it, and the
   // email-keyed pickers (assignee/`createdBy`) don't need it at all; only an
   // id-keyed consumer filters for `id` itself.
+  //
+  // The dedup key is normalized (trimmed + lower-cased), not the raw email:
+  // entity-service's own "user" table has no uniqueness constraint on email
+  // (confirmed against its schema), and real rows there can carry the same
+  // address with different case/whitespace from different ingestion paths.
+  // Comparing raw strings let two such rows both survive this loop, showing
+  // as duplicate-looking entries in the dropdown — reported live.
   const users = useMemo(() => {
     const seen = new Set<string>();
     const out: UserSearchOption[] = [];
     for (const u of (result.data?.pages ?? []).flatMap((p) => p.users)) {
-      if (!u.email || !u.name || seen.has(u.email)) continue;
-      seen.add(u.email);
+      if (!u.email || !u.name) continue;
+      const key = u.email.trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
       out.push({ id: u.id, name: u.name, email: u.email });
     }
     return out;
