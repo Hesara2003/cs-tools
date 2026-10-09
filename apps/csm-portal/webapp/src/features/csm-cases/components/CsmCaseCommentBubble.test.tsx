@@ -204,6 +204,26 @@ describe("CsmCaseCommentBubble", () => {
     expect(container.querySelector("code")).toBeNull();
   });
 
+  it("renders visible line breaks for mixed [code] content without a <p> wrapper", () => {
+    const bodyHtml = "[code]Line 1[/code][code]Line 2[/code]";
+    const { container } = renderWithProviders(
+      <CsmCaseCommentBubble comment={makeComment({ bodyHtml })} />,
+    );
+    expect(screen.getByText(/Line 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Line 2/)).toBeInTheDocument();
+    expect(container.querySelector("br")).not.toBeNull();
+  });
+
+  it("renders inline text without unexpected line breaks for [code]A[/code] and [code]B[/code]", () => {
+    const bodyHtml = "[code]A[/code] and [code]B[/code]";
+    const { container } = renderWithProviders(
+      <CsmCaseCommentBubble comment={makeComment({ bodyHtml })} />,
+    );
+    expect(container.querySelector("br")).toBeNull();
+    expect(container.querySelector("code")).toBeNull();
+    expect(container.textContent).toContain("A and B");
+  });
+
   it("linkifies a bare URL and opens it in a new tab safely", () => {
     renderWithProviders(
       <CsmCaseCommentBubble
