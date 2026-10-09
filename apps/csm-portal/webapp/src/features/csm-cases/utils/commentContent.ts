@@ -122,12 +122,13 @@ export function stripCustomerCommentAddedLabel(html: string): string {
  */
 export function hasDisplayableContent(comment: CsmCaseComment): boolean {
   const raw = comment.bodyHtml ?? "";
+  const isFullCodeWrap = hasSingleCodeWrapper(raw);
   const codeBlockCount = raw.match(/\[code\]/gi)?.length ?? 0;
-  const stripped = hasSingleCodeWrapper(raw)
+  const stripped = isFullCodeWrap
     ? stripCodeWrapper(raw)
-    : codeBlockCount > 1
+    : codeBlockCount > 0
       ? stripAllCodeBlocks(raw)
-      : convertCodeTagsToHtml(raw);
+      : raw;
   const withoutLabel = stripCustomerCommentAddedLabel(stripped);
   const textOnly = withoutLabel.replace(/<[^>]+>/g, "").trim();
   if (textOnly.length > 0) return true;
@@ -178,9 +179,9 @@ export function preprocessCommentBodyHtml(comment: CsmCaseComment): string {
   const codeBlockCount = raw.match(/\[code\]/gi)?.length ?? 0;
   const afterCode = isFullCodeWrap
     ? stripCodeWrapper(raw)
-    : codeBlockCount > 1
+    : codeBlockCount > 0
       ? stripAllCodeBlocks(raw)
-      : convertCodeTagsToHtml(raw);
+      : raw;
   return stripCustomerCommentAddedLabel(afterCode);
 }
 

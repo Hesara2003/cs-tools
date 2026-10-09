@@ -204,4 +204,25 @@ describe("isMarkdownComment / preprocessCommentBodyHtml", () => {
     expect(isMarkdownComment(comment)).toBe(false);
     expect(preprocessCommentBodyHtml(comment)).toContain("### Request Details");
   });
+
+  it("unwraps a single full [code] wrapper", () => {
+    const comment = makeComment("[code]<p>Hello world</p>[/code]");
+    expect(preprocessCommentBodyHtml(comment)).toBe("<p>Hello world</p>");
+  });
+
+  it("unwraps code tags in mixed content instead of converting to <code> elements", () => {
+    const comment = makeComment("Prefix [code]<p>Hello world</p>[/code] suffix");
+    const result = preprocessCommentBodyHtml(comment);
+    expect(result).toContain("<p>Hello world</p>");
+    expect(result).not.toContain("<code>");
+  });
+
+  it("unwraps multiple code blocks in mixed content", () => {
+    const comment = makeComment("[code]A[/code] and [code]B[/code]");
+    const result = preprocessCommentBodyHtml(comment);
+    expect(result).toContain("A");
+    expect(result).toContain("B");
+    expect(result).not.toContain("<code>");
+  });
 });
+
