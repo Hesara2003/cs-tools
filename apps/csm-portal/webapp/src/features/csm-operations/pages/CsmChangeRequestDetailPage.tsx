@@ -270,10 +270,9 @@ function PlanSection({ title, html }: { title: string; html?: string | null }): 
           wordBreak: "break-word",
           // Newly generated comments no longer carry a per-run
           // `white-space: pre-wrap` inline style (digiops-cs#2933) — declared
-          // once here instead. Older comments carry their own inline style
+          // on paragraphs instead. Older comments carry their own inline style
           // and are unaffected either way.
-          whiteSpace: "pre-wrap",
-          "& p": { my: 0.5 },
+          "& p": { my: 0.5, whiteSpace: "pre-wrap" },
           "& p:first-of-type": { mt: 0 },
           "& p:last-child": { mb: 0 },
           "& ul, & ol": { my: 0.5, pl: 3 },
