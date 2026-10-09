@@ -43,20 +43,14 @@ import { PORTAL_ROLE } from "@context/current-user/portalAccess";
 import { pickAccessibleText } from "@utils/contrastText";
 import { sanitizeRichTextHtml, stripLightModeInlineStyles } from "@utils/sanitizeHtml";
 import { useDarkMode } from "@utils/useDarkMode";
-import { markdownToHtml } from "@utils/renderMarkdown";
 import { initialsOf } from "@utils/userClaims";
 import { useResolvedInlineImageHtml } from "@features/csm-cases/api/useResolvedInlineImageHtml";
 import { replaceCallRequestLinks } from "@features/csm-cases/utils/callRequestLinks";
 import { replaceSnLinks, type SnLinkType } from "@features/csm-cases/utils/snLinkRegistry";
 import {
-  convertCodeTagsToHtml,
   hasDisplayableContent,
-  hasSingleCodeWrapper,
-  isMarkdownComment,
   linkifyBareUrls,
-  stripAllCodeBlocks,
-  stripCodeWrapper,
-  stripCustomerCommentAddedLabel,
+  preprocessCommentBodyHtml,
 } from "@features/csm-cases/utils/commentContent";
 import type {
   CsmCaseComment,
@@ -145,25 +139,10 @@ export default function CsmCaseCommentBubble({
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const isBot = comment.authorRole === "chatbot";
-  const isMarkdown = isMarkdownComment(comment);
-  // A chatbot (Novera) message body is Markdown, and so is the description of
-  // a record raised from a GitHub issue; render those to HTML first. Every
-  // other comment body is already rich-text HTML and goes through the same
-  // code-wrapper/label-stripping pipeline the customer portal uses, since
-  // Markdown bodies never carry ServiceNow's [code] wrapper tags or the
-  // "Customer comment added" label.
-  const preprocessed = useMemo(() => {
-    if (isMarkdown) return markdownToHtml(comment.bodyHtml);
-    const raw = comment.bodyHtml ?? "";
-    const isFullCodeWrap = hasSingleCodeWrapper(raw);
-    const codeBlockCount = raw.match(/\[code\]/gi)?.length ?? 0;
-    const afterCode = isFullCodeWrap
-      ? stripCodeWrapper(raw)
-      : codeBlockCount > 1
-        ? stripAllCodeBlocks(raw)
-        : convertCodeTagsToHtml(raw);
-    return stripCustomerCommentAddedLabel(afterCode);
-  }, [comment.bodyHtml, isMarkdown]);
+  const preprocessed = useMemo(
+    () => preprocessCommentBodyHtml(comment),
+    [comment],
+  );
   const darkModeHtml = isDarkMode
     ? stripLightModeInlineStyles(preprocessed)
     : preprocessed;
@@ -398,7 +377,7 @@ export default function CsmCaseCommentBubble({
               overflowX: "auto",
               overflowWrap: "anywhere",
               wordBreak: "break-word",
-              "& p": { m: 0 },
+              "& p": { m: 0, whiteSpace: "pre-wrap" },
               "& a": { color: "primary.main" },
               ...{ "& *": { fontSize: "0.875rem" } },
             }}
@@ -613,11 +592,12 @@ export default function CsmCaseCommentBubble({
             }),
             // Newly generated comments no longer carry a per-run
             // `white-space: pre-wrap` inline style (digiops-cs#2933) — this
-            // container declares it once instead, so multi-space runs and
-            // leading/trailing spaces the user typed still aren't collapsed.
+            // is declared on paragraphs instead, so multi-space runs and
+            // leading/trailing spaces the user typed aren't collapsed without
+            // breaking source-code newlines and indentation in rich HTML markup.
             // Older comments still carry their own inline style and are
             // unaffected either way.
-            whiteSpace: "pre-wrap",
+            //
             // Backend HTML can put an explicit pixel width on *any* element — a
             // Word/Excel paste arrives as `<div style="width:2400px">`, and a
             // `<pre>`/`<p>` can carry one just as easily — so the per-tag rules
@@ -641,12 +621,14 @@ export default function CsmCaseCommentBubble({
             overflowX: "auto",
             overflowWrap: "anywhere",
             wordBreak: "break-word",
-            "& p": { m: 0 },
+            "& p": { m: 0, whiteSpace: "pre-wrap" },
             "& p + p": { mt: 0.75 },
-            "& ul, & ol": { ml: 3, my: 0.5 },
+            "& ul, & ol": { pl: 2.5, ml: 0, my: 0.5 },
+            "& li": { mb: 0.25 },
             "& code": {
-              bgcolor: "background.default",
+              bgcolor: "action.hover",
               px: 0.5,
+              py: 0.25,
               borderRadius: 0.5,
               fontFamily: "monospace",
               fontSize: "0.85em",
@@ -666,7 +648,6 @@ export default function CsmCaseCommentBubble({
             },
             "& a": { color: "primary.main" },
             "& img": { maxWidth: "100%", cursor: onImageClick ? "pointer" : "default" },
-            "& br": { display: "block", content: '""', mt: 0.5 },
             "& blockquote": {
               borderLeft: 3,
               borderColor: "divider",

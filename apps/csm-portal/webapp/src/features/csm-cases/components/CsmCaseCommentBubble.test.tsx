@@ -158,6 +158,52 @@ describe("CsmCaseCommentBubble", () => {
     expect(screen.getByText("raw")).toBeInTheDocument();
   });
 
+  it("renders complex html comment with lists and code", () => {
+    const bodyHtml = `<p>Thanks for sharing the information. We've analyzed the files and here is what we found:</p>
+<ul>
+  <li>The successful run confirms that the IDP handles the ExamplePortal flow correctly.<br>
+  After the OTP code is submitted, the server resumes the original request and redirects to ExamplePortal's callback URL.</li>
+  <li>Your login application builds the enter-code URL itself.<br>
+  For example, it carries <code>screenValue=bnVsbA==</code>, which is the text "null" encoded.</li>
+  <li>The failed run shows a different behavior.<br>
+  A request reached <code>/commonauth</code> that did not contain an OTP code. The server rejected it with "No authenticator can handle the request in step : 3". This error was handled by your custom <code>CustomRequestCoordinator</code> class, and a new AuthPortal login followed.</li>
+</ul>
+<p>To complete the analysis, please share the following information:</p>
+<ol>
+  <li>A HAR of a failing attempt, starting from the ExamplePortal URL and ending on AuthPortal Home.</li>
+  <li>File http_access.log, located in the &lt;IS_HOME&gt;/repository/logs directory, covering that attempt.</li>
+  <li>File wso2carbon.log, located in the &lt;IS_HOME&gt;/repository/logs directory, with framework debug logging enabled. In &lt;IS_HOME&gt;/repository/conf/log4j.properties, set <code>log4j.logger.org.example.framework=DEBUG</code> and restart.</li>
+  <li>From your login application:
+    <ul>
+      <li>How the select-method page builds the enter-code URL.</li>
+      <li>Every place that calls <code>goToLoginPage()</code>.</li>
+    </ul>
+  </li>
+  <li>From your <code>CustomRequestCoordinator</code>: what it does when the authentication framework throws an exception.</li>
+  <li>File application-authentication.xml, located in the &lt;IS_HOME&gt;/repository/conf/identity directory.</li>
+  <li>For the failing attempt: whether the user entered the code.</li>
+</ol>`;
+    const { container } = renderWithProviders(
+      <CsmCaseCommentBubble comment={makeComment({ bodyHtml })} />,
+    );
+    expect(screen.getByText(/To complete the analysis/)).toBeInTheDocument();
+    expect(screen.getByText(/A HAR of a failing attempt/)).toBeInTheDocument();
+    expect(container.querySelectorAll("li")).toHaveLength(12);
+    expect(container.querySelectorAll("ol > li")).toHaveLength(7);
+    const p = container.querySelector("p");
+    expect(p).toHaveStyle({ whiteSpace: "pre-wrap" });
+  });
+
+  it("unwraps [code] tags in mixed content instead of converting them to <code> elements", () => {
+    const bodyHtml = "Prefix [code]<p>Inner <b>formatted</b> markup</p>[/code] suffix";
+    const { container } = renderWithProviders(
+      <CsmCaseCommentBubble comment={makeComment({ bodyHtml })} />,
+    );
+    expect(screen.getByText("formatted")).toBeInTheDocument();
+    // Inner HTML elements must not be wrapped inside a <code> tag
+    expect(container.querySelector("code")).toBeNull();
+  });
+
   it("linkifies a bare URL and opens it in a new tab safely", () => {
     renderWithProviders(
       <CsmCaseCommentBubble
