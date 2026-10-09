@@ -36,7 +36,8 @@ export function convertCodeTagsToHtml(content: string): string {
 
 /**
  * Strips all [code]...[/code] blocks and returns concatenated inner HTML.
- * Used for multi-block content to avoid grey <code> background on structured sections.
+ * Preserves rendered line breaks (<br/>) between adjacent code blocks so that
+ * breaks render visibly even in unwrapped text outside <p> elements.
  *
  * @param content - Raw content with one or more [code]...[/code] blocks.
  * @returns {string} Inner HTML without code wrappers.
@@ -48,10 +49,18 @@ export function stripAllCodeBlocks(content: string): string {
     .replace(/\[\\\/CODE\]/g, "[/code]")
     .replace(/\[\\code\]/gi, "[code]")
     .replace(/\[\\CODE\]/g, "[code]")
-    .replace(/\[\/code\]\s*\[code\]/gi, "[/code]\n[code]");
+    .replace(/\[\/code\](\s*)\[code\]/gi, (match, ws: string, offset: number, str: string) => {
+      const before = str.slice(0, offset);
+      const after = str.slice(offset + match.length);
+      const hasBlockBoundary =
+        /<\/(?:p|div|ul|ol|table|h[1-6])>\s*$/i.test(before) ||
+        /^\s*<(?:p|div|ul|ol|table|h[1-6])\b/i.test(after);
+      if (hasBlockBoundary) return "[/code]\n[code]";
+      return /\n\s*\n/.test(ws) ? "[/code]<br/><br/>[code]" : "[/code]<br/>[code]";
+    });
   return normalized
-    .replace(/\[code\]([\s\S]*?)\[\/code\]/gi, "$1\n")
-    .replace(/\[\/?code\]/gi, "\n");
+    .replace(/\[code\]([\s\S]*?)\[\/code\]/gi, "$1")
+    .replace(/\[\/?code\]/gi, "");
 }
 
 /**
