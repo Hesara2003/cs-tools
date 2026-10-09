@@ -53,10 +53,20 @@ describe("convertCodeTagsToHtml", () => {
 });
 
 describe("stripAllCodeBlocks", () => {
-  it("strips multiple [code] blocks and keeps the inner content", () => {
-    // The normalize step inserts a newline between adjacent [/code][code]
-    // markers before the blocks are stripped, hence the blank line between.
-    expect(stripAllCodeBlocks("[code]a[/code][code]b[/code]")).toBe("a\n\nb\n");
+  it("strips multiple [code] blocks and preserves rendered line breaks between adjacent blocks", () => {
+    expect(stripAllCodeBlocks("[code]a[/code][code]b[/code]")).toBe("a<br/>b");
+    expect(stripAllCodeBlocks("[code]a[/code]\n[code]b[/code]")).toBe("a<br/>b");
+    expect(stripAllCodeBlocks("[code]a[/code]\n\n[code]b[/code]")).toBe("a<br/><br/>b");
+  });
+
+  it("does not insert line breaks for inline code blocks separated by text", () => {
+    expect(stripAllCodeBlocks("[code]a[/code] and [code]b[/code]")).toBe("a and b");
+  });
+
+  it("does not insert <br/> when adjacent blocks already have block boundaries", () => {
+    expect(
+      stripAllCodeBlocks("[code]<p>a</p>[/code][code]<p>b</p>[/code]"),
+    ).toBe("<p>a</p>\n<p>b</p>");
   });
 });
 
