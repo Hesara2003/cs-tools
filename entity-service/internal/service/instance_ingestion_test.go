@@ -41,6 +41,9 @@ type mockInstanceIngestionRepo struct {
 
 	secret    string
 	secretErr error
+
+	unresolvedSince time.Time
+	unresolvedLimit int
 }
 
 func (m *mockInstanceIngestionRepo) UpsertDeploymentNode(_ context.Context, nodeID string, meta domain.InstanceNodeMeta) (string, error) {
@@ -65,6 +68,12 @@ func (m *mockInstanceIngestionRepo) ImportDailyUsagesBatch(_ context.Context, re
 	m.calls++
 	m.batch = req
 	return len(req.Usages), nil
+}
+
+func (m *mockInstanceIngestionRepo) ListUnresolvedProductNodes(_ context.Context, since time.Time, limit int) ([]domain.UnresolvedProductNode, error) {
+	m.calls++
+	m.unresolvedSince, m.unresolvedLimit = since, limit
+	return []domain.UnresolvedProductNode{{NodeID: "n1", ReportedProduct: "wso2xx"}}, nil
 }
 
 func (m *mockInstanceIngestionRepo) GetProjectSecretKey(_ context.Context, _ string) (string, error) {
@@ -303,5 +312,57 @@ func TestInstanceIngestion_SecretKeyErrorsPassThrough(t *testing.T) {
 	resp, err := newTestIngestionService(repo).GetProjectSecretKey(context.Background(), " PROJ ")
 	if err != nil || resp.SecretKey != "s3cret" {
 		t.Fatalf("resp = %+v, err = %v", resp, err)
+	}
+}
+
+func TestInstanceIngestion_ListUnresolvedProductsDefaultsAndValidation(t *testing.T) {
+	ctx := context.Background()
+
+	repo := &mockInstanceIngestionRepo{}
+	resp, err := newTestIngestionService(repo).ListUnresolvedProducts(ctx, "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// newTestIngestionService's clock is 2026-10-16T08:00Z: the default window is the last 24 hours.
+	if !repo.unresolvedSince.Equal(time.Date(2026, 10, 15, 8, 0, 0, 0, time.UTC)) || repo.unresolvedLimit != 500 {
+		t.Errorf("defaults: since %v limit %d", repo.unresolvedSince, repo.unresolvedLimit)
+	}
+	if resp.Count != 1 || resp.Nodes[0].ReportedProduct != "wso2xx" {
+		t.Errorf("response %+v", resp)
+	}
+
+	repo = &mockInstanceIngestionRepo{}
+	if _, err := newTestIngestionService(repo).ListUnresolvedProducts(ctx, "2026-10-01T00:00:00Z", "20"); err != nil {
+		t.Fatal(err)
+	}
+	if !repo.unresolvedSince.Equal(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)) || repo.unresolvedLimit != 20 {
+		t.Errorf("explicit: since %v limit %d", repo.unresolvedSince, repo.unresolvedLimit)
+	}
+
+	for _, tc := range []struct{ since, limit, contains string }{
+		{"yesterday", "", "since must be an RFC 3339 time"},
+		{"", "0", "limit must be between 1 and 5000"},
+		{"", "5001", "limit must be between 1 and 5000"},
+		{"", "ten", "limit must be between 1 and 5000"},
+	} {
+		repo := &mockInstanceIngestionRepo{}
+		_, err := newTestIngestionService(repo).ListUnresolvedProducts(ctx, tc.since, tc.limit)
+		wantValidation(t, err, tc.contains)
+		if repo.calls != 0 {
+			t.Errorf("a rejected request (%q, %q) reached the repository", tc.since, tc.limit)
+		}
+	}
+}
+
+func TestInstanceIngestion_ReportedProductAndVersionAreLengthChecked(t *testing.T) {
+	repo := &mockInstanceIngestionRepo{}
+	_, err := newTestIngestionService(repo).UpsertInstanceMeta(context.Background(), domain.InstanceMetaRequest{
+		NodeID: "n", InstanceNodeMeta: domain.InstanceNodeMeta{Product: strings.Repeat("p", 256), Version: "1"}})
+	wantValidation(t, err, "product")
+	_, err = newTestIngestionService(repo).UpsertInstanceMeta(context.Background(), domain.InstanceMetaRequest{
+		NodeID: "n", InstanceNodeMeta: domain.InstanceNodeMeta{Product: "wso2is", Version: strings.Repeat("9", 101)}})
+	wantValidation(t, err, "version")
+	if repo.calls != 0 {
+		t.Errorf("an over-long product or version reached the repository")
 	}
 }

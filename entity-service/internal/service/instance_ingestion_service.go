@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -38,6 +39,7 @@ type InstanceIngestionService interface {
 	InsertInstanceInfo(ctx context.Context, req domain.InstanceInfoRequest) (domain.InstanceInfoResponse, error)
 	InsertUsageStats(ctx context.Context, req domain.InstanceUsageIngestRequest) (domain.InstanceUsageIngestResponse, error)
 	ImportDailyUsagesBatch(ctx context.Context, req domain.DailyUsageBatchRequest) (domain.DailyUsageBatchResponse, error)
+	ListUnresolvedProducts(ctx context.Context, since string, limit string) (domain.UnresolvedProductsResponse, error)
 	GetProjectSecretKey(ctx context.Context, projectKey string) (domain.ProjectSecretKeyResponse, error)
 	GetDeploymentConsumptionSecret(ctx context.Context, deploymentNumber string) (domain.DeploymentConsumptionSecretResponse, error)
 }
@@ -53,6 +55,12 @@ const (
 	maxJDKVersionLen       = 64
 	maxInfoHashLen         = 128
 	maxDailyUsageBatchSize = 5000
+	maxReportedProductLen  = 255
+	maxReportedVersionLen  = 100
+
+	defaultUnresolvedProductsWindow = 24 * time.Hour
+	defaultUnresolvedProductsLimit  = 500
+	maxUnresolvedProductsLimit      = 5000
 )
 
 // ingestionTimeLayout is the zoneless layout product-consumption-tracking's
@@ -103,6 +111,12 @@ func normalizeNodeMeta(meta domain.InstanceNodeMeta) (domain.InstanceNodeMeta, e
 		return meta, err
 	}
 	if err := checkLen("deploymentNumber", meta.DeploymentNumber, maxDeploymentNumberLen); err != nil {
+		return meta, err
+	}
+	if err := checkLen("product", meta.Product, maxReportedProductLen); err != nil {
+		return meta, err
+	}
+	if err := checkLen("version", meta.Version, maxReportedVersionLen); err != nil {
 		return meta, err
 	}
 	return meta, nil
@@ -285,6 +299,33 @@ func (s *instanceIngestionService) ImportDailyUsagesBatch(ctx context.Context, r
 		return domain.DailyUsageBatchResponse{}, err
 	}
 	return domain.DailyUsageBatchResponse{ImportedCount: count, Status: "SUCCESS"}, nil
+}
+
+// ListUnresolvedProducts lists nodes seen since the given RFC 3339 time (the last 24
+// hours when empty) whose reported product did not match the catalogue. limit defaults
+// to 500 and may be at most 5000.
+func (s *instanceIngestionService) ListUnresolvedProducts(ctx context.Context, since string, limit string) (domain.UnresolvedProductsResponse, error) {
+	sinceTime := s.now().UTC().Add(-defaultUnresolvedProductsWindow)
+	if v := strings.TrimSpace(since); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return domain.UnresolvedProductsResponse{}, &apierror.ValidationError{Msg: "since must be an RFC 3339 time"}
+		}
+		sinceTime = t
+	}
+	n := defaultUnresolvedProductsLimit
+	if v := strings.TrimSpace(limit); v != "" {
+		parsed, err := strconv.Atoi(v)
+		if err != nil || parsed < 1 || parsed > maxUnresolvedProductsLimit {
+			return domain.UnresolvedProductsResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("limit must be between 1 and %d", maxUnresolvedProductsLimit)}
+		}
+		n = parsed
+	}
+	nodes, err := s.repo.ListUnresolvedProductNodes(ctx, sinceTime, n)
+	if err != nil {
+		return domain.UnresolvedProductsResponse{}, err
+	}
+	return domain.UnresolvedProductsResponse{Nodes: nodes, Count: len(nodes)}, nil
 }
 
 // GetProjectSecretKey retrieves the primary secret key for HMAC validation.
