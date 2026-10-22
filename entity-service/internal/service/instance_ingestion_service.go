@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -38,6 +39,7 @@ type InstanceIngestionService interface {
 	InsertInstanceInfo(ctx context.Context, req domain.InstanceInfoRequest) (domain.InstanceInfoResponse, error)
 	InsertUsageStats(ctx context.Context, req domain.InstanceUsageIngestRequest) (domain.InstanceUsageIngestResponse, error)
 	ImportDailyUsagesBatch(ctx context.Context, req domain.DailyUsageBatchRequest) (domain.DailyUsageBatchResponse, error)
+	ListUsageReportImports(ctx context.Context, projectKey, deploymentNumber, limit string) (domain.UsageReportImportsResponse, error)
 	GetProjectSecretKey(ctx context.Context, projectKey string) (domain.ProjectSecretKeyResponse, error)
 	GetDeploymentConsumptionSecret(ctx context.Context, deploymentNumber string) (domain.DeploymentConsumptionSecretResponse, error)
 }
@@ -53,6 +55,10 @@ const (
 	maxJDKVersionLen       = 64
 	maxInfoHashLen         = 128
 	maxDailyUsageBatchSize = 5000
+	maxExportVersionLen    = 20
+
+	defaultUsageReportImportsLimit = 100
+	maxUsageReportImportsLimit     = 1000
 )
 
 // ingestionTimeLayout is the zoneless layout product-consumption-tracking's
@@ -280,11 +286,39 @@ func (s *instanceIngestionService) ImportDailyUsagesBatch(ctx context.Context, r
 		n.Version = strings.TrimSpace(n.Version)
 	}
 
+	req.ExportVersion = strings.TrimSpace(req.ExportVersion)
+	if err := checkLen("exportVersion", req.ExportVersion, maxExportVersionLen); err != nil {
+		return domain.DailyUsageBatchResponse{}, err
+	}
+
 	count, err := s.repo.ImportDailyUsagesBatch(ctx, req)
 	if err != nil {
 		return domain.DailyUsageBatchResponse{}, err
 	}
 	return domain.DailyUsageBatchResponse{ImportedCount: count, Status: "SUCCESS"}, nil
+}
+
+// ListUsageReportImports lists imported offline reports for a project key and/or a
+// deployment number (at least one is required), newest first. limit defaults to 100 and
+// may be at most 1000.
+func (s *instanceIngestionService) ListUsageReportImports(ctx context.Context, projectKey, deploymentNumber, limit string) (domain.UsageReportImportsResponse, error) {
+	projectKey, deploymentNumber = strings.TrimSpace(projectKey), strings.TrimSpace(deploymentNumber)
+	if projectKey == "" && deploymentNumber == "" {
+		return domain.UsageReportImportsResponse{}, &apierror.ValidationError{Msg: "projectKey or deploymentNumber is required"}
+	}
+	n := defaultUsageReportImportsLimit
+	if v := strings.TrimSpace(limit); v != "" {
+		parsed, err := strconv.Atoi(v)
+		if err != nil || parsed < 1 || parsed > maxUsageReportImportsLimit {
+			return domain.UsageReportImportsResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("limit must be between 1 and %d", maxUsageReportImportsLimit)}
+		}
+		n = parsed
+	}
+	imports, err := s.repo.ListUsageReportImports(ctx, projectKey, deploymentNumber, n)
+	if err != nil {
+		return domain.UsageReportImportsResponse{}, err
+	}
+	return domain.UsageReportImportsResponse{Imports: imports, Count: len(imports)}, nil
 }
 
 // GetProjectSecretKey retrieves the primary secret key for HMAC validation.

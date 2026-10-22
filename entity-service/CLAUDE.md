@@ -8135,6 +8135,12 @@ it writes these tables through `POST /instances/meta`, `/instances/info`,
 `/instances/usage-stats`, `/instances/daily-usages/batch` and verifies telemetry
 signatures with `GET /projects/{key}/secret-key` (`instance_ingestion_*.go`).
 
+- **Every report import is recorded** (migration 0248, `usage_report_import`): the batch import
+  writes one history row in its own transaction (uploader, project, deployment, the report's
+  `exportVersion`/`exportedAt`/`exportValid`, node and row counts), so a failed import leaves none.
+  `GET /instances/daily-usages/imports` (`projectKey` and/or `deploymentNumber`, `limit` default
+  100, max 1000) lists them newest first. The previous system's equivalent was
+  `u_product_consumption_import_history`.
 - **Internal callers only** (`internalOnly`): PCT's client id must be in
   `M2M_CLIENT_IDS`. The repository has no system-identity fallback. The
   secret key is a credential (`Cache-Control: no-store`); a project with no key
