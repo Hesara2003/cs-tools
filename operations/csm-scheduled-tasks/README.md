@@ -81,6 +81,7 @@ per period. Every failed attempt sends a failure alert email (see [Alerting](#al
 | `publish_scheduled_announcements` | `*/15 * * * *` | Always | Finds scheduled announcements whose publish time has arrived and asks entity-service to publish each one. Every due item is attempted independently; failures are joined into one error. |
 | `cloud_status_webhooks` | `*/5 * * * *` | Only if `CLOUD_STATUS_ENABLED=true` | Asks entity-service which service-status transitions owe an outbound webhook, posts each to its configured status-dashboard base URL, and records delivery. |
 | `availability_recalculation` | `0 3 * * *` | Only if `AVAILABILITY_RECALC_ENABLED=true` | Triggers entity-service to recompute service availability figures; fails the run on a partial sweep or an empty subject list. The arithmetic runs in entity-service. |
+| `unresolved_products_digest` | `0 6 * * *` | Only does anything once `SUB_CRON_RECIPIENTS` names its recipients | Emails the deployment nodes seen in the last 24 hours whose reported product or version is not in the product catalogue (from entity-service's `GET /instances/unresolved-products`). Sends nothing on a day with nothing to report. |
 
 Effective promptness of any task is bounded by the shared driver cadence, not by its schedule
 string alone. Task names are API contracts: renaming one orphans its history and stops matching any
